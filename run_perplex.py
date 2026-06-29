@@ -49,6 +49,8 @@ PERPLEX_COMPONENTS = (
     ("CaO", "CAO"),
     ("FeO", "FEO"),
 )
+ACTIVE_COMPOSITION_OXIDES = {oxide for oxide, _ in PERPLEX_COMPONENTS}
+OMITTED_OXIDE_THRESHOLD = 1.0e-12
 
 
 class PipelineError(RuntimeError):
@@ -180,12 +182,73 @@ def clean_project_work_files(work_dir: Path, project: str) -> None:
             path.unlink()
 
 
-def composition_bulk_values(composition_file: Path) -> str:
+def load_normalized_composition(composition_file: Path) -> tuple[dict, dict[str, float]]:
     data = json.loads(composition_file.read_text())
     composition = data.get("composition_normalized")
     if not isinstance(composition, dict):
         raise PipelineError(f"Composition file lacks composition_normalized: {composition_file}")
 
+    normalized: dict[str, float] = {}
+    for oxide, value in composition.items():
+        try:
+            normalized[oxide] = float(value)
+        except (TypeError, ValueError) as exc:
+            raise PipelineError(
+                f"Composition value for {oxide} is not numeric in {composition_file}"
+            ) from exc
+    return data, normalized
+
+
+def composition_oxide_order(data: dict, composition: dict[str, float]) -> list[str]:
+    configured_order = data.get("oxide_order")
+    if isinstance(configured_order, list) and all(isinstance(oxide, str) for oxide in configured_order):
+        ordered = [oxide for oxide in configured_order if oxide in composition]
+    else:
+        ordered = []
+    ordered.extend(sorted(oxide for oxide in composition if oxide not in ordered))
+    return ordered
+
+
+def omitted_composition_oxides(composition_file: Path) -> list[tuple[str, float]]:
+    data, composition = load_normalized_composition(composition_file)
+    omitted: list[tuple[str, float]] = []
+    for oxide in composition_oxide_order(data, composition):
+        value = composition[oxide]
+        if oxide not in ACTIVE_COMPOSITION_OXIDES and abs(value) > OMITTED_OXIDE_THRESHOLD:
+            omitted.append((oxide, value))
+    return omitted
+
+
+def omitted_oxide_warning(composition_file: Path) -> str | None:
+    omitted = omitted_composition_oxides(composition_file)
+    if not omitted:
+        return None
+
+    active_components = ", ".join(component for _, component in PERPLEX_COMPONENTS)
+    omitted_text = ", ".join(f"{oxide}={value:.8f} wt%" for oxide, value in omitted)
+    return (
+        f"WARNING: {composition_file.name} contains oxide(s) omitted from Perple_X BUILD "
+        f"because the active component list is {active_components}: {omitted_text}"
+    )
+
+
+def warn_omitted_oxides(model: ModelConfig) -> None:
+    try:
+        warning = omitted_oxide_warning(model.composition_file)
+    except PipelineError as exc:
+        print(f"WARNING: Could not inspect omitted oxides for {model.project}: {exc}", file=sys.stderr)
+        return
+
+    if not warning:
+        return
+
+    print(warning, file=sys.stderr)
+    warning_path = model.output_dir / "oxide_omissions.txt"
+    warning_path.write_text(warning + "\n")
+
+
+def composition_bulk_values(composition_file: Path) -> str:
+    _, composition = load_normalized_composition(composition_file)
     missing = [oxide for oxide, _ in PERPLEX_COMPONENTS if oxide not in composition]
     if missing:
         raise PipelineError(
@@ -194,12 +257,7 @@ def composition_bulk_values(composition_file: Path) -> str:
 
     values: list[str] = []
     for oxide, _ in PERPLEX_COMPONENTS:
-        try:
-            values.append(f"{float(composition[oxide]):.8f}")
-        except (TypeError, ValueError) as exc:
-            raise PipelineError(
-                f"Composition value for {oxide} is not numeric in {composition_file}"
-            ) from exc
+        values.append(f"{composition[oxide]:.8f}")
     return " ".join(values)
 
 
@@ -316,6 +374,8 @@ def run_model(perplex_dir: Path, model: ModelConfig) -> None:
     model.work_dir.mkdir(parents=True, exist_ok=True)
     if not model.composition_file.exists():
         print(f"WARNING: composition file not found for {model.project}: {model.composition_file}")
+    else:
+        warn_omitted_oxides(model)
 
     option_path = write_options(model.work_dir)
     print(f"Wrote {option_path}")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 
 import make_compositions
+import plot_comparisons
 import run_perplex
 
 
@@ -16,6 +17,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--skip-compositions",
         action="store_true",
         help="Skip regenerating composition files before running Perple_X.",
+    )
+    parser.add_argument(
+        "--skip-plots",
+        action="store_true",
+        help="Skip generating comparison SVGs after Perple_X validation passes.",
     )
     return parser.parse_args(argv)
 
@@ -32,7 +38,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.project:
         run_args.extend(["--project", args.project])
 
-    return run_perplex.main(run_args)
+    result = run_perplex.main(run_args)
+    if result != 0 or args.skip_plots:
+        return result
+
+    print("Generating comparison plots")
+    plot_args = ["--config", args.config]
+    if args.project:
+        plot_args.extend(["--project", args.project])
+    return plot_comparisons.main(plot_args)
 
 
 if __name__ == "__main__":

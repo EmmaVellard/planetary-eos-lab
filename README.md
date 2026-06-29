@@ -2,6 +2,8 @@
 
 This directory contains a local Python pipeline for generating and validating Perple_X WERAMI tables for lunar near-side and far-side lunar composition proxies.
 
+For the current composition numbers and caveats, see [composition.md](composition.md).
+
 The target PlanetProfile-facing table columns are:
 
 ```text
@@ -35,6 +37,8 @@ KREEP, Th, U, and K effects should mostly be represented through PlanetProfile t
 - Copies `<work_dir>/<project>_1.tab` to `outputs/<project>/<project>_raw_werami.tab`.
 - Writes `outputs/<project>/<project>_planetprofile.tab` with temperature before pressure.
 - Saves `build.log`, `vertex.log`, and `werami.log`.
+- Warns when nonzero oxides in the composition JSON are omitted from the active Perple_X BUILD component list.
+- Writes comparison SVG plots under `outputs/comparisons/`.
 - Writes `validation_report.txt`.
 - Exits nonzero when validation fails.
 
@@ -55,6 +59,8 @@ run_full_pipeline.py
 make_compositions.py
 run_perplex.py
 validate_tab.py
+plot_comparisons.py
+composition.md
 compositions/
 build_inputs/
 outputs/
@@ -64,6 +70,8 @@ tests/
 Copy `configs/models.example.json` to `configs/models.json` and set `perplex_dir` to your local Perple_X install. `configs/models.json` is ignored because it is machine-local. It contains the Perple_X install path, project names, composition paths, build input paths, output directories, and optional work directories. The Perple_X install is treated as an external executable dependency; generated files are written under this repository, using `outputs/<project>/work` by default.
 
 The included BUILD input transcripts use `stx21ver.dat` and `stx21_solution_model.dat` from the configured Perple_X install. They use `${PERPLEX_DIR}` placeholders, which the runner replaces from `configs/models.json` at runtime. They also use `${PERPLEX_BULK_VALUES}`, which the runner expands from each composition JSON in the Perple_X component order `NA2O MGO AL2O3 SIO2 CAO FEO`. That Stixrude 2021 database supports `NA2O`, `MGO`, `AL2O3`, `SIO2`, `CAO`, and `FEO`, so `TiO2`, `K2O`, and `P2O5` are retained in the composition record but are not passed to BUILD.
+
+When a composition contains a nonzero oxide that is not passed to BUILD, the runner prints a warning and writes `outputs/<project>/oxide_omissions.txt`.
 
 The BUILD transcripts currently exclude pure `qtz` because this database can produce invalid quartz seismic properties for the highlands-like proxy over the smoke-test P-T grid. That exclusion keeps PlanetProfile-facing density and seismic tables finite, but it should be revisited if the goal shifts from pipeline testing to a publication-quality crust or mantle-crust equilibrium model.
 
@@ -81,10 +89,23 @@ To run one project:
 python3 run_full_pipeline.py --project moon_far_dry_mantle
 ```
 
-This regenerates compositions, runs BUILD/VERTEX/WERAMI, copies the raw WERAMI table, writes the PlanetProfile-facing table, and writes validation reports. To debug Perple_X without regenerating compositions:
+This regenerates compositions, runs BUILD/VERTEX/WERAMI, copies the raw WERAMI table, writes the PlanetProfile-facing table, writes validation reports, and writes:
+
+```text
+outputs/comparisons/composition_oxides.svg
+outputs/comparisons/planetprofile_properties.svg
+```
+
+To debug Perple_X without regenerating compositions:
 
 ```bash
 python3 run_full_pipeline.py --skip-compositions
+```
+
+To skip comparison plots:
+
+```bash
+python3 run_full_pipeline.py --skip-plots
 ```
 
 ## Generate Compositions
@@ -168,6 +189,16 @@ n
 1
 0
 ```
+
+## Plot Comparisons
+
+After valid PlanetProfile tables exist, regenerate the comparison SVGs directly with:
+
+```bash
+python3 plot_comparisons.py
+```
+
+This writes `composition_oxides.svg` and `planetprofile_properties.svg` under `outputs/comparisons/` by default. The property plot compares pressure profiles averaged over the sampled temperature grid.
 
 ## Validate Outputs
 

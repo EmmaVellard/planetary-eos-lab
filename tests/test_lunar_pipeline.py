@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import make_compositions
+import plot_comparisons
 import run_perplex
 
 
@@ -143,6 +144,7 @@ def run_full_pipeline(config_path: Path) -> subprocess.CompletedProcess[str]:
             "--config",
             str(config_path),
             "--skip-compositions",
+            "--skip-plots",
         ],
         cwd=str(PIPELINE_DIR),
         text=True,
@@ -202,6 +204,85 @@ def test_render_build_input_expands_bulk_values_from_composition(tmp_path: Path)
 
     assert str(tmp_path / "fake_perplex") in rendered
     assert "0.60060060 9.20920921 14.91491491 45.44544545 11.81181181 14.11411411" in rendered
+
+
+def test_omitted_oxide_warning_mentions_nonzero_dropped_oxides(tmp_path: Path) -> None:
+    composition_file = tmp_path / "composition.json"
+    composition_file.write_text(
+        json.dumps(
+            {
+                "oxide_order": ["SiO2", "TiO2", "Al2O3", "FeO", "MgO", "CaO", "Na2O", "K2O", "P2O5"],
+                "composition_normalized": {
+                    "SiO2": 45.0,
+                    "TiO2": 3.5,
+                    "Al2O3": 15.0,
+                    "FeO": 14.0,
+                    "MgO": 9.0,
+                    "CaO": 12.0,
+                    "Na2O": 0.5,
+                    "K2O": 0.0,
+                    "P2O5": 1.0,
+                },
+            }
+        )
+        + "\n"
+    )
+
+    warning = run_perplex.omitted_oxide_warning(composition_file)
+
+    assert warning is not None
+    assert "TiO2=3.50000000 wt%" in warning
+    assert "P2O5=1.00000000 wt%" in warning
+    assert "K2O" not in warning
+
+
+def test_plot_comparisons_writes_svg_files(tmp_path: Path) -> None:
+    perplex_dir = make_fake_perplex(tmp_path)
+    models = []
+    for project, sio2, feo, output_name in [
+        ("far_project", 45.5, 5.9, "far"),
+        ("near_project", 45.4, 14.1, "near"),
+    ]:
+        composition_file = tmp_path / f"{project}.json"
+        composition_file.write_text(
+            json.dumps(
+                {
+                    "composition_normalized": {
+                        "SiO2": sio2,
+                        "TiO2": 0.0,
+                        "Al2O3": 15.0,
+                        "FeO": feo,
+                        "MgO": 10.0,
+                        "CaO": 12.0,
+                        "Na2O": 0.5,
+                        "K2O": 0.0,
+                        "P2O5": 0.0,
+                    }
+                }
+            )
+            + "\n"
+        )
+        output_dir = tmp_path / "outputs" / output_name
+        output_dir.mkdir(parents=True)
+        (output_dir / f"{project}_planetprofile.tab").write_text(VALID_TAB)
+        models.append(
+            {
+                "project": project,
+                "composition_file": str(composition_file),
+                "build_input_file": str(tmp_path / f"{project}.build.in"),
+                "output_dir": str(output_dir),
+            }
+        )
+
+    config_path = tmp_path / "models.json"
+    config_path.write_text(json.dumps({"perplex_dir": str(perplex_dir), "models": models}) + "\n")
+    output_dir = tmp_path / "comparison_plots"
+
+    result = plot_comparisons.main(["--config", str(config_path), "--output-dir", str(output_dir)])
+
+    assert result == 0
+    assert "<svg" in (output_dir / "composition_oxides.svg").read_text()
+    assert "<svg" in (output_dir / "planetprofile_properties.svg").read_text()
 
 
 def test_successful_run_validates_with_fake_perplex(tmp_path: Path) -> None:
