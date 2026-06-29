@@ -1,0 +1,1 @@
+WARNING: moon_far_dry_mantle.json contains oxide(s) omitted from Perple_X BUILD because the active component list is NA2O, MGO, AL2O3, SIO2, CAO, FEO: TiO2=0.60000000 wt%
