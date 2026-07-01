@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 import export_planetprofile
 import make_compositions
 import plot_comparisons

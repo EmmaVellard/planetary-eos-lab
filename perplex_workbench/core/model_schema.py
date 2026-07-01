@@ -3,9 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 import make_compositions
 import run_perplex
-
 
 OXIDE_ORDER = tuple(make_compositions.OXIDE_ORDER)
 ACTIVE_BUILD_COMPONENTS = tuple(run_perplex.PERPLEX_COMPONENTS)
