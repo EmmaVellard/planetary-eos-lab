@@ -12,6 +12,22 @@ The target PlanetProfile-facing table columns are:
 T(K), P(bar), rho_kgm3, VP_kms, VS_kms, Cp_Jm3K, alpha_pK, KS_bar, GS_bar
 ```
 
+## GitHub Quick Start
+
+The repository can be cloned and run directly, but the full Perple_X steps are local: GitHub does not provide the BUILD, VERTEX, WERAMI executables or Perple_X datafiles.
+
+```bash
+git clone https://github.com/EmmaVellard/perplex-workbench.git
+cd perplex-workbench
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp configs/models.example.json configs/models.json
+streamlit run perplex_workbench/gui/streamlit_app.py
+```
+
+In the GUI, set the Perple_X directory to your local installation before running Perple_X. The included default config uses portable placeholders, so users should not need Emma-specific paths.
+
 ## Current Scientific Status
 
 The included model identifiers are deliberately conservative:
@@ -82,6 +98,8 @@ plot_comparisons.py
 planetprofile_tables.py
 export_planetprofile.py
 composition.md
+requirements.txt
+requirements-dev.txt
 compositions/
 build_inputs/
 outputs/
@@ -135,6 +153,23 @@ Default BUILD template assumptions recorded in provenance:
 - solution models: `O`, `Opx`, `Cpx`, `Gt`, `Sp`, `Pl`, `C2/c`, `NaAl`
 
 These assumptions are suitable for current smoke-test mechanics only. A scientific model should revisit the database, component set, Ti-bearing phases, solution models, phase exclusions, and P-T grid.
+
+## Streamlit GUI
+
+Launch from the repository root after installing `requirements.txt`:
+
+```bash
+streamlit run perplex_workbench/gui/streamlit_app.py
+```
+
+The GUI has two main workspaces:
+
+- `Build Composition`: create a model, copy an existing model, edit oxides/metadata, preview normalized composition, and delete saved models from `configs/models.json` with a confirmation popup.
+- `Run Pipeline`: select a saved model, review caveats, generate composition files, run BUILD/VERTEX/WERAMI, validate outputs, plot comparisons, and export PlanetProfile tables.
+
+The first GUI version only supports the oxide set used by the current source schema: `SiO2`, `TiO2`, `Al2O3`, `FeO`, `MgO`, `CaO`, `Na2O`, `K2O`, and `P2O5`. Other elements/components require extending the schema and BUILD template first.
+
+The GUI cannot make the current models scientifically final. Perple_X must still be installed locally, generated files in `compositions/` should not be edited manually, and the included lunar models remain surface-proxy smoke tests.
 
 ## Run Full Pipeline
 
