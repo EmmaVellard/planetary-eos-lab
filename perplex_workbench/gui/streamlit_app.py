@@ -26,11 +26,15 @@ from perplex_workbench.core.config_io import (
     save_config_json,
     update_perplex_dir,
 )
+from perplex_workbench.gui.autosave import show_autosave_controls
+from perplex_workbench.gui.batch_processor import show_batch_workspace
+from perplex_workbench.gui.comparison_tools import show_comparison_workspace
 from perplex_workbench.gui.database_selector import (
     get_current_database,
     show_database_selector,
 )
 from perplex_workbench.gui.import_export import show_import_export_panel
+from perplex_workbench.gui.phase_diagram import show_phase_diagram_panel
 from perplex_workbench.gui.validation_enhanced import show_enhanced_validation
 from perplex_workbench.core.model_schema import (
     ACTIVE_BUILD_COMPONENTS,
@@ -66,6 +70,8 @@ st.set_page_config(page_title="Perple_X Workbench", layout="wide")
 
 COMPOSITION_BUILDER_MODE = "Build Composition"
 PIPELINE_MODE = "Run Pipeline"
+BATCH_PROCESSING_MODE = "Batch Processing"
+COMPARISON_MODE = "Compare Models"
 
 PIPELINE_STEPS = [
     "1. Setup & Select Model",
@@ -734,7 +740,7 @@ def main() -> None:
     with st.sidebar:
         st.header("Workspace")
         st.caption("Main task")
-        for mode in [PIPELINE_MODE, COMPOSITION_BUILDER_MODE]:
+        for mode in [PIPELINE_MODE, COMPOSITION_BUILDER_MODE, BATCH_PROCESSING_MODE, COMPARISON_MODE]:
             st.button(
                 mode,
                 key=f"workspace_mode_{mode}",
@@ -777,6 +783,11 @@ def main() -> None:
             step = str(st.session_state.get("workflow_step_choice", PIPELINE_STEPS[0]))
         else:
             st.caption("Create or edit a saved model, then switch to Run Pipeline when you are ready.")
+        st.divider()
+
+        # Auto-save controls
+        show_autosave_controls()
+
         st.divider()
         st.caption("Local configuration")
         config_input = st.text_input("Config path", value=str(DEFAULT_CONFIG_PATH.relative_to(REPO_ROOT)))
@@ -836,6 +847,14 @@ def main() -> None:
         show_model_catalog(models, selected_project)
         with st.expander("Delete a saved model"):
             delete_model_panel(config_path, config, models, selected_project)
+        return
+
+    if workspace_mode == BATCH_PROCESSING_MODE:
+        show_batch_workspace(config_path, config, models)
+        return
+
+    if workspace_mode == COMPARISON_MODE:
+        show_comparison_workspace(models, config_path)
         return
 
     if step == "1. Setup & Select Model":
@@ -933,26 +952,37 @@ def main() -> None:
 
     elif step == "5. Validate / Export":
         st.header("Step 5. Validate / Export")
-        show_outputs(config_path, models, export_dir)
-        st.subheader("PlanetProfile Export")
-        st.warning("Export success does not imply scientific readiness.")
-        st.caption(
-            "The export manifest is not required by PlanetProfile, but it is strongly useful as a readable "
-            "record of what was exported and which scientific caveats apply."
-        )
-        st.subheader("Export selected saved model")
-        if st.button("Export selected model"):
-            run_streamlit_command(
-                export_planetprofile_command(
-                    config_path,
-                    project=selected_project,
-                    export_dir=export_dir,
-                )
+
+        # Tabs for different views
+        tab1, tab2, tab3 = st.tabs(["📊 Validation & Output", "📈 Phase Diagram", "📁 Export"])
+
+        with tab1:
+            show_outputs(config_path, models, export_dir)
+
+        with tab2:
+            show_phase_diagram_panel(models, selected_project, config_path)
+
+        with tab3:
+            st.subheader("PlanetProfile Export")
+            st.warning("Export success does not imply scientific readiness.")
+            st.caption(
+                "The export manifest is not required by PlanetProfile, but it is strongly useful as a readable "
+                "record of what was exported and which scientific caveats apply."
             )
-        st.divider()
-        st.subheader("Export all saved models")
-        if st.button("Export all models"):
-            run_streamlit_command(export_planetprofile_command(config_path, export_dir=export_dir))
+            st.subheader("Export selected saved model")
+            if st.button("Export selected model"):
+                run_streamlit_command(
+                    export_planetprofile_command(
+                        config_path,
+                        project=selected_project,
+                        export_dir=export_dir,
+                    )
+                )
+            st.divider()
+            st.subheader("Export all saved models")
+            if st.button("Export all models"):
+                run_streamlit_command(export_planetprofile_command(config_path, export_dir=export_dir))
+
 
 
 if __name__ == "__main__":
