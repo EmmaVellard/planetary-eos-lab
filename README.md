@@ -206,5 +206,5 @@ If you use this software in your research, please cite:
 ## Acknowledgments
 
 - [Perple_X](https://github.com/jadconnolly/Perple_X) by James Connolly
-- [PlanetProfile](https://github.com/NASA-Planetary-Science/PlanetProfile) by NASA Planetary Science
-- Lunar composition data from Wikipedia and published literature (see [composition.md](composition.md))
+- [PlanetProfile](https://github.com/vancesteven/PlanetProfile) by Steve Vance
+- Lunar composition data from published literature (see [composition.md](composition.md))
