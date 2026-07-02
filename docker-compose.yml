@@ -1,10 +1,10 @@
 version: '3.8'
 
 services:
-  perplex-workbench:
+  planetary-eos-lab:
     build: .
-    image: perplex-workbench:1.0
-    container_name: perplex-workbench
+    image: planetary-eos-lab:1.0
+    container_name: planetary-eos-lab
     ports:
       - "8501:8501"
     volumes:
@@ -29,10 +29,10 @@ services:
       start_period: 5s
 
   # Optional: Run CLI commands in a separate container
-  perplex-cli:
+  planetary-eos-cli:
     build: .
-    image: perplex-workbench:1.0
-    container_name: perplex-cli
+    image: planetary-eos-lab:1.0
+    container_name: planetary-eos-cli
     volumes:
       - /path/to/your/perplex:/opt/perplex:ro
       - ./outputs:/app/outputs

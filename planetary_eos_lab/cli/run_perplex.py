@@ -25,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
         Exit code
     """
     parser = create_base_parser(
-        prog="perplex-run",
+        prog="planetary-eos-run",
         description="Run Perple_X BUILD/VERTEX/WERAMI pipeline",
     )
     parser.add_argument(

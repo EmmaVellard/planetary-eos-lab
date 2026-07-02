@@ -20,7 +20,7 @@ def main(argv: list[str] | None = None) -> int:
         Exit code
     """
     parser = argparse.ArgumentParser(
-        prog="perplex-gui",
+        prog="planetary-eos-gui",
         description="Launch Planetary EOS Lab GUI",
     )
     parser.add_argument(

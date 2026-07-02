@@ -1,15 +1,15 @@
-# Perple_X Workbench Docker Image
+# Planetary EOS Lab Docker Image
 #
-# This Dockerfile creates a containerized environment for running Perple_X Workbench.
+# This Dockerfile creates a containerized environment for running Planetary EOS Lab.
 # Note: Perple_X must be provided separately due to licensing.
 #
-# Build: docker build -t perplex-workbench .
-# Run:   docker run -p 8501:8501 -v /path/to/perplex:/opt/perplex perplex-workbench
+# Build: docker build -t planetary-eos-lab .
+# Run:   docker run -p 8501:8501 -v /path/to/perplex:/opt/perplex planetary-eos-lab
 
 FROM python:3.11-slim
 
 LABEL maintainer="Emma Vellard <emma.vellard@outlook.fr>"
-LABEL description="Perple_X Workbench - GUI workflow for planetary thermodynamics"
+LABEL description="Planetary EOS Lab - GUI workflow for planetary thermodynamics"
 LABEL version="1.0"
 
 # Install system dependencies
@@ -49,4 +49,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=5).read()" || exit 1
 
 # Default command: launch GUI
-CMD ["perplex-gui", "--address", "0.0.0.0"]
+CMD ["planetary-eos-gui", "--address", "0.0.0.0"]

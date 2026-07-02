@@ -133,8 +133,8 @@ docker run --rm \
 docker-compose up -d
 
 # Run CLI commands
-docker-compose exec perplex-cli planetary-eos-run --help
-docker-compose exec perplex-cli planetary-eos-compositions
+docker-compose exec planetary-eos-cli planetary-eos-run --help
+docker-compose exec planetary-eos-cli planetary-eos-compositions
 ```
 
 ## Multi-stage Builds (Advanced)

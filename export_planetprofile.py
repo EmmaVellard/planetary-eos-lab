@@ -151,7 +151,7 @@ def write_manifest(
 ) -> Path:
     manifest = {
         "schema_version": 2,
-        "description": "PlanetProfile-format Perple_X EOS tables exported by perplex-workbench.",
+        "description": "PlanetProfile-format Perple_X EOS tables exported by Planetary EOS Lab.",
         "export_warning": (
             "Export success means the files are mechanically available to PlanetProfile. "
             "Export success does not imply scientific readiness: the compositions, "
