@@ -15,7 +15,7 @@ outputs/*
 compositions/
 
 # Old package name (after rebrand)
-perplex_workbench/
+planetary-eos-lab/
 
 # Internal documentation (keep local, don't publish)
 COMPREHENSIVE_REVIEW.md

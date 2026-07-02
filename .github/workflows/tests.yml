@@ -34,13 +34,13 @@ jobs:
 
     - name: Test GUI can be imported
       run: |
-        python -c "from perplex_workbench.gui.streamlit_app import main"
+        python -c "from planetary-eos-lab.gui.streamlit_app import main"
 
     - name: Test CLI entry points
       run: |
-        python -c "from perplex_workbench.cli.gui import main"
-        python -c "from perplex_workbench.cli.run_perplex import main"
-        python -c "from perplex_workbench.cli.make_compositions import main"
+        python -c "from planetary-eos-lab.cli.gui import main"
+        python -c "from planetary-eos-lab.cli.run_perplex import main"
+        python -c "from planetary-eos-lab.cli.make_compositions import main"
 
   lint:
     runs-on: ubuntu-latest
@@ -80,7 +80,7 @@ jobs:
 
     - name: Run tests with coverage
       run: |
-        pytest --cov=perplex_workbench --cov-report=xml --cov-report=term
+        pytest --cov=planetary-eos-lab --cov-report=xml --cov-report=term
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
