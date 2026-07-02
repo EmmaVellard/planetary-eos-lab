@@ -198,7 +198,7 @@ If you use this software in your research, please cite:
 @software{planetary_eos_lab,
   author = {Vellard, Emma},
   title = {Planetary EOS Lab: GUI workflow for planetary thermodynamics},
-  year = {2024},
+  year = {2026},
   url = {https://github.com/EmmaVellard/planetary-eos-lab}
 }
 ```
