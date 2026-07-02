@@ -37,7 +37,11 @@ from planetary_eos_lab.gui.database_selector import (
     get_current_database,
     show_database_selector,
 )
-from planetary_eos_lab.gui.import_export import show_import_export_panel
+from planetary_eos_lab.gui.import_export import (
+    export_model_definitions_to_json,
+    model_definitions_export_filename,
+    show_import_export_panel,
+)
 from planetary_eos_lab.gui.phase_diagram import show_phase_diagram_panel
 from planetary_eos_lab.core.database_utils import get_database_components
 from planetary_eos_lab.core.model_schema import (
@@ -683,6 +687,18 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
         "After saving, the composition becomes a saved model that can be selected and run through the pipeline."
     )
 
+    st.subheader("Thermodynamic Setup")
+    st.caption(
+        "This choice controls which oxides are modeled by the default BUILD template and which are saved "
+        "as source-only metadata. Changing it changes the oxide fields and warnings shown below."
+    )
+    database = show_database_selector(config, config_path)
+    st.info(
+        f"Build Composition is currently using `{database}`. Saved compositions keep all oxide values, "
+        "but the modeled/source-only split follows the active thermodynamic setup."
+    )
+    st.divider()
+
     builder_action = st.radio(
         "Builder action",
         options=["Create a new composition", "Copy a saved composition", "Edit a saved composition"],
@@ -818,8 +834,8 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
         source_only_oxides = get_source_only_oxides(database)
         modeled_oxides = [oxide for oxide in OXIDE_ORDER if oxide in active_oxides]
 
-        st.subheader("Modeled Oxides, wt%")
-        st.caption(f"These oxides are passed to the {database} BUILD template.")
+        st.subheader(f"Modeled Oxides for {database}, wt%")
+        st.caption(f"These oxides are passed to the active {database} BUILD template.")
         modeled_columns = st.columns(3)
         for index, oxide in enumerate(modeled_oxides):
             with modeled_columns[index % 3]:
@@ -831,7 +847,7 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
                     format="%.2f",
                     key=f"workspace_oxide_{choice_key}_{oxide}",
                 )
-        st.subheader("Source-Only Oxides, wt%")
+        st.subheader(f"Source-Only Oxides for {database}, wt%")
         st.caption(f"Saved in the composition record, plots, and warnings, but not passed to {database} BUILD.")
         source_columns = st.columns(3)
         for index, oxide in enumerate(source_only_oxides):
@@ -1276,14 +1292,45 @@ def main() -> None:
             show_phase_diagram_panel(models, phase_default, config_path)
 
         with tab3:
-            st.subheader("PlanetProfile Export")
-            st.warning("Export success does not imply scientific readiness.")
+            st.subheader("Export")
+            st.caption("Download saved model definitions, export generated PlanetProfile tables, or both.")
+            projects_to_export = st.multiselect(
+                "Saved models",
+                options=available_projects,
+                key="export_model_projects",
+                on_change=sync_model_selection,
+                args=("export_model_projects", available_projects),
+                format_func=lambda project: model_label(next(model for model in models if model.get("project") == project)),
+                help="Choose one or more saved model entries for the export actions below.",
+            )
+            if not projects_to_export:
+                st.info("Select at least one saved model.")
+
+            st.divider()
+            st.subheader("Model Definition Export")
             st.caption(
-                "Choose the saved models to export. PlanetProfile reads the `.tab` files directly; "
-                "the manifest is optional provenance for humans and scripts."
+                "Download the selected entries from `configs/models.json`. "
+                "This includes composition and metadata, and does not require Perple_X or PlanetProfile output."
+            )
+            selected_export_json = export_model_definitions_to_json(models, projects_to_export) if projects_to_export else ""
+            st.download_button(
+                "Download selected model definition(s)",
+                data=selected_export_json,
+                file_name=model_definitions_export_filename(projects_to_export) if projects_to_export else "model_definitions.json",
+                mime="application/json",
+                disabled=not projects_to_export,
+                use_container_width=True,
+            )
+
+            st.divider()
+            st.subheader("PlanetProfile Table Export")
+            st.warning("PlanetProfile export success does not imply scientific readiness.")
+            st.caption(
+                "Copy generated native PlanetProfile-format `.tab` files to a PlanetProfile-ready folder. "
+                "PlanetProfile reads the `.tab` files directly; the manifest is optional provenance."
             )
             planetprofile_export = st.checkbox(
-                "PlanetProfile export",
+                "Export generated PlanetProfile `.tab` files",
                 value=True,
                 help=(
                     "Copy each native PlanetProfile-format table to a PlanetProfile-ready export folder "
@@ -1297,19 +1344,9 @@ def main() -> None:
                     help="Destination folder for the `.tab` files that can be copied into PlanetProfile.",
                 )
             else:
-                st.info("Enable PlanetProfile export to copy generated `.tab` files to an export folder.")
-            projects_to_export = st.multiselect(
-                "Saved models to export",
-                options=available_projects,
-                key="export_model_projects",
-                on_change=sync_model_selection,
-                args=("export_model_projects", available_projects),
-                format_func=lambda project: model_label(next(model for model in models if model.get("project") == project)),
-                help="Choose one or more saved model entries from configs/models.json.",
-            )
-            if not projects_to_export:
-                st.info("Select at least one saved model to export.")
-            if st.button("Export selected model(s)", disabled=not projects_to_export or not planetprofile_export):
+                st.info("PlanetProfile table export is disabled. Model-definition download above is still available.")
+
+            if st.button("Export selected PlanetProfile table(s)", disabled=not projects_to_export or not planetprofile_export):
                 commands = [
                     relabel_command(
                         export_planetprofile_command(

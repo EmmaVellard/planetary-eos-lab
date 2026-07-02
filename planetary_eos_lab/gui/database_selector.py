@@ -60,6 +60,10 @@ def show_database_selector(config: dict[str, Any], config_path: Path) -> str:
 
     # Switch database if changed
     if selected != current_db:
+        st.warning(
+            f"`{current_db}` is still the active thermodynamic setup. "
+            f"Apply the switch before editing or running models with `{selected}`."
+        )
         if st.button(f"💾 Switch to {selected} database", type="primary"):
             config["database"] = selected
             if selected in DEFAULT_BUILD_TEMPLATES:
@@ -68,6 +72,7 @@ def show_database_selector(config: dict[str, Any], config_path: Path) -> str:
             st.success(f"✅ Database changed to {selected}. The new database will be used for all future calculations.")
             st.info("Existing models in your config remain unchanged. Their compositions may need adjustment if switching databases.")
             st.rerun()
+        return current_db
 
     return selected
 

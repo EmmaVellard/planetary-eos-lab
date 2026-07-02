@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from planetary_eos_lab.core import config_io, model_schema, pipeline_runner, validation_summary
+from planetary_eos_lab.gui.import_export import export_model_definitions_to_json, model_definitions_export_filename
 
 
 def example_model() -> dict:
@@ -63,6 +64,20 @@ def test_delete_model_entries_removes_multiple_projects() -> None:
         "second_model",
         "third_model",
     ]
+
+
+def test_model_definition_export_serializes_selected_models() -> None:
+    first = example_model()
+    second = dict(example_model(), project="second_model")
+
+    exported = json.loads(export_model_definitions_to_json([first, second], ["second_model"]))
+
+    assert exported["schema_version"] == 1
+    assert exported["model_count"] == 1
+    assert exported["models"][0]["project"] == "second_model"
+    assert "not generated Perple_X output tables" in exported["description"]
+    assert model_definitions_export_filename(["second_model"]) == "second_model_model_definition.json"
+    assert model_definitions_export_filename(["first", "second"]) == "planetary_eos_lab_model_definitions.json"
 
 
 def test_model_validation_normalization_and_omitted_oxides() -> None:

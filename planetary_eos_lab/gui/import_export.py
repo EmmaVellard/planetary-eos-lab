@@ -1,6 +1,8 @@
 """Composition import/export functionality for CSV and Excel files."""
 from __future__ import annotations
 
+import json
+from copy import deepcopy
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Any
@@ -88,6 +90,28 @@ def export_composition_to_excel(model: dict[str, Any]) -> bytes:
     df.to_excel(buffer, index=False, engine="openpyxl")
     buffer.seek(0)
     return buffer.read()
+
+
+def model_definitions_export_filename(selected_projects: list[str]) -> str:
+    """Return a readable filename for exported model definitions."""
+    if len(selected_projects) == 1:
+        return f"{selected_projects[0]}_model_definition.json"
+    return "planetary_eos_lab_model_definitions.json"
+
+
+def export_model_definitions_to_json(models: list[dict[str, Any]], selected_projects: list[str]) -> str:
+    """Export selected saved model definitions as a portable JSON document."""
+    selected = [deepcopy(model) for model in models if str(model.get("project", "")) in selected_projects]
+    payload = {
+        "schema_version": 1,
+        "description": (
+            "Planetary EOS Lab saved model definitions exported from configs/models.json. "
+            "This file contains composition and model metadata, not generated Perple_X output tables."
+        ),
+        "model_count": len(selected),
+        "models": selected,
+    }
+    return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
 
 def show_import_export_panel(config_path: Path, config: dict[str, Any]):
