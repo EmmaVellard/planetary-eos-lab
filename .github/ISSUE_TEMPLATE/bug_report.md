@@ -28,7 +28,7 @@ Paste the full error message and traceback here
 - OS: [e.g., macOS 13.0, Ubuntu 22.04, Windows 11]
 - Python version: [e.g., 3.11.5]
 - Perple_X version: [e.g., 7.1.4]
-- Perple_X Workbench version: [e.g., 1.0]
+- Planetary EOS Lab version: [e.g., 1.0]
 - Installation method: [e.g., pip, git clone]
 
 ## Configuration

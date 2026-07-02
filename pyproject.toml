@@ -3,9 +3,9 @@ requires = ["setuptools>=65.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "perplex-workbench"
+name = "planetary-eos-lab"
 version = "1.0"
-description = "A GUI-first workflow for defining rock/planetary compositions, running Perple_X, and exporting PlanetProfile-ready EOS tables"
+description = "A GUI-first laboratory for planetary equation-of-state modeling with Perple_X and PlanetProfile integration"
 readme = "README.md"
 license = {file = "LICENSE"}
 authors = [
@@ -48,26 +48,26 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/EmmaVellard/perplex-workbench"
-Repository = "https://github.com/EmmaVellard/perplex-workbench"
-Issues = "https://github.com/EmmaVellard/perplex-workbench/issues"
-Documentation = "https://github.com/EmmaVellard/perplex-workbench#readme"
+Homepage = "https://github.com/EmmaVellard/planetary-eos-lab"
+Repository = "https://github.com/EmmaVellard/planetary-eos-lab"
+Issues = "https://github.com/EmmaVellard/planetary-eos-lab/issues"
+Documentation = "https://github.com/EmmaVellard/planetary-eos-lab#readme"
 
 [project.scripts]
-perplex-gui = "perplex_workbench.cli.gui:main"
-perplex-run = "perplex_workbench.cli.run_perplex:main"
-perplex-make-compositions = "perplex_workbench.cli.make_compositions:main"
-perplex-export = "perplex_workbench.cli.export_planetprofile:main"
-perplex-plot = "perplex_workbench.cli.plot_comparisons:main"
-perplex-pipeline = "perplex_workbench.cli.run_full_pipeline:main"
+planetary-eos-gui = "planetary_eos_lab.cli.gui:main"
+planetary-eos-run = "planetary_eos_lab.cli.run_perplex:main"
+planetary-eos-compositions = "planetary_eos_lab.cli.make_compositions:main"
+planetary-eos-export = "planetary_eos_lab.cli.export_planetprofile:main"
+planetary-eos-plot = "planetary_eos_lab.cli.plot_comparisons:main"
+planetary-eos-pipeline = "planetary_eos_lab.cli.run_full_pipeline:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["perplex_workbench*"]
+include = ["planetary_eos_lab*"]
 exclude = ["tests*", "outputs*", "compositions*", "configs*", "build_inputs*"]
 
 [tool.setuptools.package-data]
-perplex_workbench = ["py.typed"]
+planetary_eos_lab = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
