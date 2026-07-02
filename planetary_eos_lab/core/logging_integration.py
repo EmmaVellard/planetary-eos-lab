@@ -6,7 +6,7 @@ import logging
 import sys
 from typing import Any, Callable, TypeVar, cast
 
-from perplex_workbench.core.logging_config import get_logger
+from planetary_eos_lab.core.logging_config import get_logger
 
 
 T = TypeVar("T", bound=Callable[..., Any])

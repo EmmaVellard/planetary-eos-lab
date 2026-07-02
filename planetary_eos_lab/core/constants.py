@@ -1,4 +1,4 @@
-"""Constants used throughout Perple_X Workbench."""
+"""Constants used throughout Planetary EOS Lab."""
 from __future__ import annotations
 
 from typing import Final

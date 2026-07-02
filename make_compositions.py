@@ -5,8 +5,8 @@ import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from perplex_workbench.core.config import DATABASES
-from perplex_workbench.core.database_utils import get_database_components, get_source_only_oxides
+from planetary_eos_lab.core.config import DATABASES
+from planetary_eos_lab.core.database_utils import get_database_components, get_source_only_oxides
 
 
 BASE_DIR = Path(__file__).resolve().parent

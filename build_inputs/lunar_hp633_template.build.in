@@ -5,6 +5,7 @@ n
 
 n
 n
+n
 Na2O
 MgO
 Al2O3
@@ -23,6 +24,9 @@ ${PERPLEX_BULK_VALUES}
 n
 y
 n
+q
+crst
+trd
 
 y
 ${PERPLEX_DIR}/datafiles/solution_model.dat

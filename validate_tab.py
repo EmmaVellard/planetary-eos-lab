@@ -193,6 +193,13 @@ def scan_table_for_issues(tab_path: Path, tab: TabData) -> list[str]:
         if all(math.isnan(value) for value in values):
             issues.append(f"NaN-only column: {header}")
 
+    row_count = len(tab.rows)
+    for canonical, display in REQUIRED_COLUMNS.items():
+        column_index = indices[canonical]
+        nonfinite_count = sum(1 for row in tab.rows if not math.isfinite(row[column_index]))
+        if 0 < nonfinite_count < row_count:
+            issues.append(f"Non-finite values in {display}: {nonfinite_count} of {row_count}")
+
     alpha_values = finite_values(tab.rows, indices["alpha_pk"])
     if alpha_values and all(abs(value) <= 1.0e-30 for value in alpha_values):
         issues.append("Zero-only alpha column: alpha_pK")

@@ -9,10 +9,10 @@ from typing import Any
 
 import streamlit as st
 
-from perplex_workbench.core.config_io import save_config_json
-from perplex_workbench.core.model_schema import OXIDE_ORDER, validate_model_entry
-from perplex_workbench.core.pipeline_runner import full_pipeline_command
-from perplex_workbench.core.validation_summary import (
+from planetary_eos_lab.core.config_io import save_config_json
+from planetary_eos_lab.core.model_schema import OXIDE_ORDER, validate_model_entry
+from planetary_eos_lab.core.pipeline_runner import full_pipeline_command
+from planetary_eos_lab.core.validation_summary import (
     model_output_paths,
     read_text_if_exists,
     validation_status,
@@ -207,7 +207,7 @@ def show_batch_workspace(config_path: Path, config: dict[str, Any], models: list
         if not projects_to_run:
             st.info("Select at least one batch model to run.")
         if st.button("Run selected batch model(s)", disabled=not projects_to_run, use_container_width=True):
-            from perplex_workbench.gui.streamlit_app import relabel_command, run_streamlit_commands
+            from planetary_eos_lab.gui.streamlit_app import relabel_command, run_streamlit_commands
 
             commands = [
                 relabel_command(full_pipeline_command(config_path, project=project), f"Run pipeline: {project}")

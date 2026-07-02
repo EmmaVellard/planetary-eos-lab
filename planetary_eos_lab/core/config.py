@@ -1,4 +1,4 @@
-"""Centralized configuration management for Perple_X Workbench."""
+"""Centralized configuration management for Planetary EOS Lab."""
 from __future__ import annotations
 
 import json
@@ -7,14 +7,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from perplex_workbench.core.constants import (
+from planetary_eos_lab.core.constants import (
     DEFAULT_DATABASE_FILE,
     DEFAULT_SOLUTION_MODEL_FILE,
     DEFAULT_EXCLUDED_PHASES,
     DEFAULT_SOLUTION_MODELS,
     DEFAULT_PT_RANGE,
 )
-from perplex_workbench.core.exceptions import ConfigurationError
+from planetary_eos_lab.core.exceptions import ConfigurationError
 
 
 @dataclass
@@ -49,7 +49,7 @@ DATABASES = {
         name="hp633",
         database_file="hp633ver.dat",
         solution_model_file="solution_model.dat",
-        excluded_phases=(),
+        excluded_phases=("q", "crst", "trd"),
         solution_models=("O(HP)", "Opx(HP)", "Cpx(HP)", "Gt(HP)", "Sp(HP)", "Pl(I1,HP)", "Ilm(WPH)"),
         pt_range=DEFAULT_PT_RANGE.copy(),
         description=(
@@ -62,7 +62,7 @@ DATABASES = {
 
 @dataclass
 class Config:
-    """Central configuration for Perple_X Workbench.
+    """Central configuration for Planetary EOS Lab.
 
     Loads settings from:
     1. Default values

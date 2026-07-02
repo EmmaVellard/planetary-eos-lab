@@ -8,8 +8,8 @@ import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 
-from perplex_workbench.core.model_schema import OXIDE_ORDER, normalize_composition
-from perplex_workbench.core.validation_summary import (
+from planetary_eos_lab.core.model_schema import OXIDE_ORDER, normalize_composition
+from planetary_eos_lab.core.validation_summary import (
     model_output_paths,
     read_text_if_exists,
     validation_status,

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from perplex_workbench.core.config import DATABASES
-from perplex_workbench.core.constants import OXIDE_ORDER
+from planetary_eos_lab.core.config import DATABASES
+from planetary_eos_lab.core.constants import OXIDE_ORDER
 
 
 def get_database_components(database_name: str) -> tuple[tuple[str, str], ...]:

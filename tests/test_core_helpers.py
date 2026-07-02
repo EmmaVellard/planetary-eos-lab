@@ -5,7 +5,7 @@ import math
 import sys
 from pathlib import Path
 
-from perplex_workbench.core import config_io, model_schema, pipeline_runner, validation_summary
+from planetary_eos_lab.core import config_io, model_schema, pipeline_runner, validation_summary
 
 
 def example_model() -> dict:

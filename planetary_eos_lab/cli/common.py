@@ -7,9 +7,9 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from perplex_workbench.core.config import load_config, get_default_config_path
-from perplex_workbench.core.logging_config import setup_logging, get_logger
-from perplex_workbench.core.exceptions import ConfigurationError
+from planetary_eos_lab.core.config import load_config, get_default_config_path
+from planetary_eos_lab.core.logging_config import setup_logging, get_logger
+from planetary_eos_lab.core.exceptions import ConfigurationError
 
 
 __version__ = "1.0"

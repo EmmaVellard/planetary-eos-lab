@@ -345,6 +345,22 @@ def test_default_werami_input_sequence_is_backwards_compatible(tmp_path: Path) -
     )
 
 
+def test_hp633_default_werami_sequence_answers_fluid_prompt_and_requests_density(tmp_path: Path) -> None:
+    model = run_perplex.ModelConfig(
+        project=PROJECT,
+        composition_file=tmp_path / "composition.json",
+        build_input_file=tmp_path / "build.in",
+        output_dir=tmp_path / "output",
+        work_dir=tmp_path / "work",
+        database="hp633",
+        werami_input_sequence=run_perplex.default_werami_sequence_for_database("hp633"),
+    )
+
+    assert run_perplex.werami_input_text(model) == (
+        f"{PROJECT}\n2\n38\n1\nn\n2\n13\n14\n3\n4\n10\n11\n0\nn\n1\n0\n"
+    )
+
+
 def test_parse_perplex_database_components_from_stx_style_header() -> None:
     text = (
         "title | comment begin_components | < 6 chars, molar weight "
@@ -424,6 +440,7 @@ def test_hp633_config_uses_matching_default_template(tmp_path: Path) -> None:
     assert loaded.database == "hp633"
     assert loaded.models[0].database == "hp633"
     assert loaded.models[0].build_input_file == PIPELINE_DIR / "build_inputs" / "lunar_hp633_template.build.in"
+    assert loaded.models[0].werami_input_sequence == run_perplex.default_werami_sequence_for_database("hp633")
 
 
 def test_render_hp633_build_input_uses_hp_bulk_values(tmp_path: Path) -> None:
@@ -462,6 +479,20 @@ def test_render_hp633_build_input_uses_hp_bulk_values(tmp_path: Path) -> None:
     assert rendered.strip() == "0.50000000 9.00000000 15.00000000 45.00000000 0.50000000 12.00000000 4.00000000 14.00000000"
 
 
+def test_default_build_templates_answer_chemical_potential_prompt_before_components() -> None:
+    stx_template = (PIPELINE_DIR / "build_inputs" / "lunar_stx21_template.build.in").read_text()
+    hp_template = (PIPELINE_DIR / "build_inputs" / "lunar_hp633_template.build.in").read_text()
+
+    assert "\nn\nn\nn\nNA2O\nMGO\nAL2O3\n" in stx_template
+    assert "\nn\nn\nn\nNa2O\nMgO\nAl2O3\n" in hp_template
+
+
+def test_hp633_default_template_excludes_silica_phases_with_incomplete_seismic_properties() -> None:
+    hp_template = (PIPELINE_DIR / "build_inputs" / "lunar_hp633_template.build.in").read_text()
+
+    assert "\nn\ny\nn\nq\ncrst\ntrd\n\ny\n" in hp_template
+
+
 def test_planetprofile_native_conversion(tmp_path: Path) -> None:
     source = tmp_path / "source.tab"
     source.write_text(VALID_TAB)
@@ -483,7 +514,7 @@ def test_planetprofile_native_conversion(tmp_path: Path) -> None:
 
 
 def test_phase_diagram_property_points_support_velocity_columns(tmp_path: Path) -> None:
-    from perplex_workbench.gui import phase_diagram
+    from planetary_eos_lab.gui import phase_diagram
 
     source = tmp_path / "source.tab"
     source.write_text(VALID_TAB)
@@ -497,6 +528,160 @@ def test_phase_diagram_property_points_support_velocity_columns(tmp_path: Path) 
     assert t_points == [1200.0, 1200.0, 1300.0, 1300.0]
     assert p_points == [0.1, 0.2, 0.1, 0.2]
     assert values == [8.0, 8.05, 8.06, 8.1]
+
+
+def test_phase_diagram_simplified_assemblages_group_minor_phase_changes() -> None:
+    from planetary_eos_lab.core.phase_parser import AssemblageGrid, assemblage_boundary_segments
+    from planetary_eos_lab.gui import phase_diagram
+
+    assemblage_grid = AssemblageGrid(
+        ids=[[1, 2, 3], [4, 5, None]],
+        labels={
+            1: ("Cpx(HP)", "Gt(HP)", "coe", "ru"),
+            2: ("Cpx(HP)", "Gt(HP)", "q"),
+            3: ("Cpx(HP)", "Gt(HP)", "crst"),
+            4: ("Opx(HP)", "Cpx(HP)", "ru"),
+            5: ("ru",),
+        },
+    )
+
+    group_labels, raw_to_group_id = phase_diagram.build_simplified_assemblage_labels(assemblage_grid)
+    simplified_ids = phase_diagram.remap_assemblage_ids(assemblage_grid.ids, raw_to_group_id)
+
+    assert simplified_ids[0][0] == simplified_ids[0][1] == simplified_ids[0][2]
+    assert group_labels[simplified_ids[0][0]] == ("Cpx(HP)", "Gt(HP)", "SiO2")
+    assert group_labels[simplified_ids[1][0]] == ("Opx(HP)", "Cpx(HP)")
+    assert group_labels[simplified_ids[1][1]] == ("ru",)
+    assert phase_diagram.simplified_phase_tuple(("Cpx(HP)", "qL", "anL")) == ("Cpx(HP)", "Melt(L)")
+    assert phase_diagram.major_framework_phase_tuple(("Cpx(HP)", "Gt(HP)", "coe", "ru")) == ("Cpx(HP)", "Gt(HP)")
+    assert phase_diagram.major_framework_phase_tuple(("qL", "anL")) == ("Melt(L)",)
+
+    framework_labels, framework_raw_to_group_id = phase_diagram.build_grouped_assemblage_labels(
+        assemblage_grid,
+        phase_diagram.MAJOR_FRAMEWORK_ASSEMBLAGE_OPTION,
+    )
+    framework_ids = phase_diagram.remap_assemblage_ids(assemblage_grid.ids, framework_raw_to_group_id)
+
+    assert framework_ids[0][0] == framework_ids[0][1] == framework_ids[0][2]
+    assert framework_labels[framework_ids[0][0]] == ("Cpx(HP)", "Gt(HP)")
+
+    hover_grid = phase_diagram.assemblage_hover_grid(
+        framework_ids,
+        framework_labels,
+        hover_label="Major framework",
+    )
+    assert "Major framework" in hover_grid[0][0]
+    assert "Full Perple_X assemblage" not in hover_grid[0][0]
+    assert phase_diagram.assemblage_field_label(("Cpx(HP)", "Gt(HP)")) == "Cpx + Gt"
+    caption_text = phase_diagram.assemblage_caption_text(
+        assemblage_grid,
+        phase_diagram.MAJOR_FRAMEWORK_ASSEMBLAGE_OPTION,
+    )
+    assert "The '+' sign means" in caption_text
+    assert "Opx = orthopyroxene" in caption_text
+    assert "Cpx = clinopyroxene" in caption_text
+    assert "Gt = garnet" in caption_text
+
+    detailed_caption_text = phase_diagram.assemblage_caption_text(
+        assemblage_grid,
+        phase_diagram.DETAILED_ASSEMBLAGE_OPTION,
+    )
+    assert "coe = coesite" in detailed_caption_text
+    assert "q = quartz" in detailed_caption_text
+    assert "ru = rutile" in detailed_caption_text
+
+    detailed_segments = assemblage_boundary_segments(
+        temperatures_k=[800.0, 900.0, 1000.0],
+        pressures=[0.1, 0.2],
+        assemblage_ids=assemblage_grid.ids,
+    )
+    simplified_segments = assemblage_boundary_segments(
+        temperatures_k=[800.0, 900.0, 1000.0],
+        pressures=[0.1, 0.2],
+        assemblage_ids=simplified_ids,
+    )
+
+    assert simplified_segments.count < detailed_segments.count
+
+    polylines = phase_diagram.connected_boundary_polylines(
+        temperatures_k=[800.0, 900.0, 1000.0],
+        pressures=[0.1, 0.2],
+        assemblage_ids=framework_ids,
+    )
+    boundary_x, boundary_y, boundary_count = phase_diagram.boundary_polyline_coordinates(polylines)
+
+    assert boundary_count > 0
+    assert boundary_x[-1] is None
+    assert boundary_y[-1] is None
+
+
+def test_parse_vertex_assemblage_preview_from_plt_and_blk(tmp_path: Path) -> None:
+    from planetary_eos_lab.core.phase_parser import (
+        assemblage_boundary_segments,
+        parse_assemblage_grid,
+    )
+
+    plt_path = tmp_path / "model.plt"
+    blk_path = tmp_path / "model.blk"
+    plt_path.write_text(
+        "\n".join(
+            [
+                "2 3 1",
+                "2 1",
+                "2 2",
+                "2",
+                "2 0 2",
+                "1 2",
+                "1 0 1",
+                "-4",
+                "",
+                "4 compound counter",
+                "1 fo",
+                "2 fa",
+                "3 coe",
+                "4 q",
+                "",
+                "2 solution model counter",
+                "1 8 4 Opx(HP)",
+                "2 2 2 O(HP)",
+            ]
+        )
+    )
+    blk_path.write_text(
+        "\n".join(
+            [
+                "1 1 1",
+                "0.1 0.2",
+                "1 2 1",
+                "0.1 0.2",
+                "1 3 2",
+                "0.1 0.2",
+                "2 1 1",
+                "0.1 0.2",
+                "2 2 2",
+                "0.1 0.2",
+                "2 3 2",
+                "0.1 0.2",
+            ]
+        )
+    )
+
+    assemblage_grid = parse_assemblage_grid(plt_path, blk_path)
+
+    assert assemblage_grid is not None
+    assert assemblage_grid.ids == [[1, 1, 2], [1, 2, 2]]
+    assert assemblage_grid.labels[1] == ("Opx(HP)", "O(HP)")
+    assert assemblage_grid.labels[2] == ("q",)
+
+    segments = assemblage_boundary_segments(
+        temperatures_k=[800.0, 900.0, 1000.0],
+        pressures=[0.1, 0.2],
+        assemblage_ids=assemblage_grid.ids,
+    )
+
+    assert segments.count == 3
+    assert 950.0 in segments.x
+    assert any(math.isclose(value, 0.15) for value in segments.y if value is not None)
 
 
 def test_export_planetprofile_copies_native_tables_with_manifest(tmp_path: Path) -> None:
@@ -766,6 +951,18 @@ def test_bad_number_sentinel_in_tab_fails_validation(tmp_path: Path) -> None:
 
     assert result.returncode != 0
     assert "bad-number" in (output_dir / "validation_report.txt").read_text()
+
+
+def test_partial_nan_required_column_fails_validation(tmp_path: Path) -> None:
+    partial_nan_tab = VALID_TAB.replace("8.05", "NaN", 1)
+    perplex_dir = make_fake_perplex(tmp_path, tab_text=partial_nan_tab)
+    config_path, output_dir = make_config(tmp_path, perplex_dir)
+
+    result = run_pipeline(config_path)
+
+    assert result.returncode != 0
+    report = (output_dir / "validation_report.txt").read_text()
+    assert "Non-finite values in VP_kms: 1 of 4" in report
 
 
 def test_zero_only_alpha_column_fails_validation(tmp_path: Path) -> None:

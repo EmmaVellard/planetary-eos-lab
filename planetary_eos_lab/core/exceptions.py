@@ -1,9 +1,9 @@
-"""Custom exceptions for Perple_X Workbench."""
+"""Custom exceptions for Planetary EOS Lab."""
 from __future__ import annotations
 
 
 class PerplexWorkbenchError(Exception):
-    """Base exception for all Perple_X Workbench errors."""
+    """Base exception for all Planetary EOS Lab errors."""
 
     pass
 

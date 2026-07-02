@@ -1,4 +1,4 @@
-"""Centralized logging configuration for Perple_X Workbench."""
+"""Centralized logging configuration for Planetary EOS Lab."""
 from __future__ import annotations
 
 import logging

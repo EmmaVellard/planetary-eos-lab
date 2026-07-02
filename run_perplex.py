@@ -9,8 +9,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from perplex_workbench.core.config import DATABASES
-from perplex_workbench.core.database_utils import get_database_components, get_source_only_oxides
+from planetary_eos_lab.core.config import DATABASES
+from planetary_eos_lab.core.database_utils import get_database_components, get_source_only_oxides
 from planetprofile_tables import write_planetprofile_native_table
 from validate_tab import column_indices, read_tab, validate_project_output
 
@@ -52,11 +52,35 @@ DEFAULT_WERAMI_INPUT_SEQUENCE = (
     "1",
     "0",
 )
+HP633_WERAMI_INPUT_SEQUENCE = (
+    "2",
+    "38",
+    "1",
+    "n",
+    "2",
+    "13",
+    "14",
+    "3",
+    "4",
+    "10",
+    "11",
+    "0",
+    "n",
+    "1",
+    "0",
+)
+DEFAULT_WERAMI_INPUT_SEQUENCES = {
+    "stx21": DEFAULT_WERAMI_INPUT_SEQUENCE,
+    "hp633": HP633_WERAMI_INPUT_SEQUENCE,
+}
 WERAMI_INPUT_DESCRIPTION = {
     "mode": "2D grid table",
     "property": "38 system properties",
     "requested_columns": ["P(bar)", "T(K)", "rho", "Vp", "Vs", "Cp", "alpha", "Ks", "Gs"],
-    "note": "Sequence is the historical default used by this workbench and can be overridden per model with werami_input_sequence.",
+    "note": (
+        "Default prompt sequences are database-specific when Perple_X asks extra prompts. "
+        "They can be overridden per model with werami_input_sequence."
+    ),
 }
 
 PLANETPROFILE_COLUMNS = (
@@ -165,10 +189,17 @@ def resolve_path(value: str | Path, base_dir: Path) -> Path:
     return (base_dir / path).resolve()
 
 
-def werami_sequence_from_config(model: dict) -> tuple[str, ...]:
+def default_werami_sequence_for_database(database: str) -> tuple[str, ...]:
+    return DEFAULT_WERAMI_INPUT_SEQUENCES.get(
+        resolve_database_name(database),
+        DEFAULT_WERAMI_INPUT_SEQUENCE,
+    )
+
+
+def werami_sequence_from_config(model: dict, database: str = DEFAULT_DATABASE) -> tuple[str, ...]:
     sequence = model.get("werami_input_sequence")
     if sequence is None:
-        return DEFAULT_WERAMI_INPUT_SEQUENCE
+        return default_werami_sequence_for_database(database)
     if not isinstance(sequence, list):
         raise ValueError("werami_input_sequence must be a JSON list of prompt responses.")
     return tuple(str(item) for item in sequence)
@@ -226,7 +257,7 @@ def load_config(
                 model_scope=model.get("model_scope"),
                 planetprofile_readiness=model.get("planetprofile_readiness"),
                 composition_interpretation=model.get("composition_interpretation"),
-                werami_input_sequence=werami_sequence_from_config(model),
+                werami_input_sequence=werami_sequence_from_config(model, model_database),
             )
         )
 

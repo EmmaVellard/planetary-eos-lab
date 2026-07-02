@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 import make_compositions
 import run_perplex
 
-from perplex_workbench.core.database_utils import (
+from planetary_eos_lab.core.database_utils import (
     get_active_oxides,
     get_source_only_oxides,
 )

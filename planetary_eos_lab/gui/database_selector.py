@@ -6,8 +6,8 @@ from typing import Any
 
 import streamlit as st
 
-from perplex_workbench.core.config_io import save_config_json
-from perplex_workbench.core.database_utils import (
+from planetary_eos_lab.core.config_io import save_config_json
+from planetary_eos_lab.core.database_utils import (
     describe_database,
     get_active_oxides,
     get_source_only_oxides,
@@ -100,6 +100,7 @@ def database_selector_help_text() -> str:
 - **hp633**: Holland & Powell 2011 setup
   - Modeled oxides: Na2O, MgO, Al2O3, SiO2, K2O, CaO, TiO2, FeO
   - P2O5 is still source-only unless you provide a P-bearing database/template
+  - Default BUILD excludes `q`, `crst`, and `trd` to avoid incomplete seismic properties
   - Use when TiO2 or K2O need to be passed to BUILD
 
 The database choice affects which oxides are included in Perple_X BUILD calculations.

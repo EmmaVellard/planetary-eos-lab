@@ -11,7 +11,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from perplex_workbench.cli.common import create_base_parser, handle_cli_error
+from planetary_eos_lab.cli.common import create_base_parser, handle_cli_error
 import run_perplex
 
 
@@ -58,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
         return run_perplex.main(original_args)
 
     except Exception as e:
-        from perplex_workbench.core.logging_config import get_logger
+        from planetary_eos_lab.core.logging_config import get_logger
         return handle_cli_error(get_logger(__name__), e)
 
 

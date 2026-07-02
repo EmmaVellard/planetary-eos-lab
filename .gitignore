@@ -12,6 +12,25 @@ outputs/*
 *.blk
 *_seismic_data.txt
 *.log
+compositions/
+
+# Old package name (after rebrand)
+perplex_workbench/
+
+# Internal documentation (keep local, don't publish)
+COMPREHENSIVE_REVIEW.md
+REVIEW_SUMMARY.md
+IMPROVEMENTS_SUMMARY.md
+FINAL_IMPROVEMENTS.md
+RELEASE_CHECKLIST.md
+REBRAND_SUMMARY.md
+REBRAND_COMPLETE.md
+COMMIT_PLAN.md
+COMMITS_CREATED.md
+IMPROVEMENTS_V1.1.md
+V1.1_RELEASE_SUMMARY.md
+TESTING_GUIDE_V1.1.md
+HANDOFF.md
 
 # Files
 docs/

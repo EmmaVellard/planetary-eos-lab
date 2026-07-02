@@ -17,7 +17,7 @@ import streamlit.components.v1 as components
 
 import plot_comparisons
 import run_perplex
-from perplex_workbench.core.config_io import (
+from planetary_eos_lab.core.config_io import (
     DEFAULT_CONFIG_PATH,
     EXAMPLE_CONFIG_PATH,
     copy_example_config,
@@ -30,17 +30,17 @@ from perplex_workbench.core.config_io import (
     save_config_json,
     update_perplex_dir,
 )
-from perplex_workbench.gui.autosave import show_autosave_controls
-from perplex_workbench.gui.batch_processor import show_batch_workspace
-from perplex_workbench.gui.comparison_tools import show_comparison_workspace
-from perplex_workbench.gui.database_selector import (
+from planetary_eos_lab.gui.autosave import show_autosave_controls
+from planetary_eos_lab.gui.batch_processor import show_batch_workspace
+from planetary_eos_lab.gui.comparison_tools import show_comparison_workspace
+from planetary_eos_lab.gui.database_selector import (
     get_current_database,
     show_database_selector,
 )
-from perplex_workbench.gui.import_export import show_import_export_panel
-from perplex_workbench.gui.phase_diagram import show_phase_diagram_panel
-from perplex_workbench.core.database_utils import get_database_components
-from perplex_workbench.core.model_schema import (
+from planetary_eos_lab.gui.import_export import show_import_export_panel
+from planetary_eos_lab.gui.phase_diagram import show_phase_diagram_panel
+from planetary_eos_lab.core.database_utils import get_database_components
+from planetary_eos_lab.core.model_schema import (
     OXIDE_ORDER,
     composition_plot_rows,
     new_model_template,
@@ -51,13 +51,13 @@ from perplex_workbench.core.model_schema import (
     use_as_final_moon_mantle_eos,
     validate_model_entry,
 )
-from perplex_workbench.core.pipeline_runner import (
+from planetary_eos_lab.core.pipeline_runner import (
     PipelineCommand,
     export_planetprofile_command,
     full_pipeline_command,
     generate_compositions_command,
 )
-from perplex_workbench.core.validation_summary import (
+from planetary_eos_lab.core.validation_summary import (
     export_manifest_path,
     export_manifest_table_rows,
     model_output_paths,
@@ -67,7 +67,7 @@ from perplex_workbench.core.validation_summary import (
 )
 
 
-st.set_page_config(page_title="Perple_X Workbench", layout="wide")
+st.set_page_config(page_title="Planetary EOS Lab", layout="wide", page_icon="🪐")
 
 DEFAULT_PLANETPROFILE_EXPORT_DIR = REPO_ROOT / "outputs" / "planetprofile_export"
 COMPOSITION_BUILDER_MODE = "Build Composition"
@@ -106,6 +106,13 @@ def inject_styles() -> None:
     st.markdown(
         """
         <style>
+        /* Lilac purple color scheme */
+        :root {
+            --primary-color: #b19cd9;
+            --primary-hover: #a28dca;
+            --primary-light: #c5b5e3;
+            --primary-dark: #8877b8;
+        }
         section[data-testid="stSidebar"] div.stButton > button {
             justify-content: flex-start;
             border-radius: 7px;
@@ -113,13 +120,13 @@ def inject_styles() -> None:
             transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
         }
         section[data-testid="stSidebar"] div.stButton > button:hover {
-            border-color: #d84b5b;
-            background: rgba(216, 75, 91, 0.08);
+            border-color: #b19cd9;
+            background: rgba(177, 156, 217, 0.12);
             color: #30283a;
         }
         section[data-testid="stSidebar"] div.stButton > button[kind="primary"]:hover {
-            background: #c43d50;
-            border-color: #c43d50;
+            background: #a28dca;
+            border-color: #a28dca;
             color: #ffffff;
         }
         section[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] {
@@ -138,25 +145,41 @@ def inject_styles() -> None:
         }
         section[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:hover {
             background: transparent;
-            border-bottom-color: var(--primary-color, #d84b5b);
-            color: var(--primary-color, #d84b5b);
+            border-bottom-color: #b19cd9;
+            color: #8877b8;
             font-weight: 700;
         }
         section[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:hover * {
-            color: var(--primary-color, #d84b5b);
+            color: #8877b8;
             font-weight: 700;
         }
         section[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) {
-            border-bottom-color: var(--primary-color, #d84b5b);
-            color: var(--primary-color, #d84b5b);
+            border-bottom-color: #b19cd9;
+            color: #8877b8;
             font-weight: 700;
         }
         section[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) * {
-            color: var(--primary-color, #d84b5b);
+            color: #8877b8;
             font-weight: 700;
         }
         section[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child {
             display: none;
+        }
+        /* Primary buttons */
+        button[kind="primary"] {
+            background-color: #b19cd9 !important;
+            border-color: #b19cd9 !important;
+        }
+        button[kind="primary"]:hover {
+            background-color: #a28dca !important;
+            border-color: #a28dca !important;
+        }
+        /* Links and accents */
+        a {
+            color: #8877b8 !important;
+        }
+        a:hover {
+            color: #b19cd9 !important;
         }
         </style>
         """,
@@ -790,7 +813,7 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
         base_oxides = {}
     edited["oxides_wt_percent"] = {}
     with oxide_col:
-        from perplex_workbench.core.database_utils import get_active_oxides, get_source_only_oxides
+        from planetary_eos_lab.core.database_utils import get_active_oxides, get_source_only_oxides
         active_oxides = get_active_oxides(database)
         source_only_oxides = get_source_only_oxides(database)
         modeled_oxides = [oxide for oxide in OXIDE_ORDER if oxide in active_oxides]
@@ -1006,7 +1029,8 @@ def show_outputs(
 
 def main() -> None:
     inject_styles()
-    st.title("Perple_X Workbench")
+    st.title("🪐 Planetary EOS Lab")
+    st.caption("A laboratory for planetary equation-of-state modeling with Perple_X")
     st.warning(
         "Current included lunar models are surface or terrane proxy smoke tests, "
         "not final lunar mantle EOS models."

@@ -8,8 +8,8 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from perplex_workbench.core.config_io import list_model_entries, save_config_json
-from perplex_workbench.core.model_schema import OXIDE_ORDER, new_model_template
+from planetary_eos_lab.core.config_io import list_model_entries, save_config_json
+from planetary_eos_lab.core.model_schema import OXIDE_ORDER, new_model_template
 
 
 def import_composition_from_csv(file_content: str | bytes) -> dict[str, float]:

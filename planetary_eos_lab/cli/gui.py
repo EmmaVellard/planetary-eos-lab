@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GUI entry point for Perple_X Workbench."""
+"""GUI entry point for Planetary EOS Lab."""
 from __future__ import annotations
 
 import argparse
@@ -7,7 +7,7 @@ import sys
 import subprocess
 from pathlib import Path
 
-from perplex_workbench.cli.common import __version__
+from planetary_eos_lab.cli.common import __version__
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,7 +21,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = argparse.ArgumentParser(
         prog="perplex-gui",
-        description="Launch Perple_X Workbench GUI",
+        description="Launch Planetary EOS Lab GUI",
     )
     parser.add_argument(
         "--port",

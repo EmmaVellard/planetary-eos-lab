@@ -6,8 +6,8 @@ from typing import Any
 
 import streamlit as st
 
-from perplex_workbench.core.database_utils import get_active_oxides
-from perplex_workbench.core.model_schema import validate_model_entry
+from planetary_eos_lab.core.database_utils import get_active_oxides
+from planetary_eos_lab.core.model_schema import validate_model_entry
 
 
 @dataclass
