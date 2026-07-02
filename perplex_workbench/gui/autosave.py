@@ -91,7 +91,6 @@ def show_autosave_controls():
     """Render auto-save settings in sidebar."""
     init_autosave_state()
 
-    st.sidebar.divider()
     st.sidebar.caption("💾 Auto-save")
 
     enable_autosave = st.sidebar.checkbox(

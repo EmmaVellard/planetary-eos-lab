@@ -38,7 +38,7 @@
   "scientific_status": "surface_proxy_smoke_test",
   "model_scope": "surface_terrane_proxy",
   "planetprofile_readiness": "mechanically_exportable_not_scientifically_final",
-  "composition_interpretation": "Average maria-like lunar surface oxide composition used to test the near-side end of a terrane contrast; TiO2 is source-only in the default stx21 setup, so it is not a final Ti-bearing mantle EOS model.",
+  "composition_interpretation": "Average maria-like lunar surface oxide composition used to test the near-side end of a terrane contrast; nonzero TiO2 is not passed to BUILD in the default stx21 setup, so it is not a final Ti-bearing mantle EOS model.",
   "placeholder": false,
   "literature_proxy": true,
   "source_note": "Major oxides use a commonly tabulated lunar maria average surface composition (SiO2 45.4, Al2O3 14.9, CaO 11.8, FeO 14.1, MgO 9.2, TiO2 3.9, Na2O 0.6 wt%). Used here as a nearside/maria surface proxy; PKT/KREEP heat-producing elements should be treated separately.",

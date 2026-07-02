@@ -175,28 +175,45 @@ def show_batch_workspace(config_path: Path, config: dict[str, Any], models: list
 
     # Run batch section
     st.divider()
-    st.subheader("Run Batch Pipeline")
+    st.subheader("Run Generated Batch Models")
 
     # Find batch models (those that match the sweep pattern)
     batch_prefix = f"{base_project}_sweep_{varied_oxide}_"
     batch_models = [m for m in models if m["project"].startswith(batch_prefix)]
 
-    if batch_models:
+    if not batch_models:
+        st.info(
+            "No generated batch models found for this base composition and oxide. "
+            "Use `Add batch to config` above first; after the config is saved, the generated variants "
+            "will appear here."
+        )
+    else:
         st.caption(f"Found {len(batch_models)} models in this batch")
 
-        # Show quick status
         validated = sum(
             1
             for m in batch_models
             if validation_status(read_text_if_exists(model_output_paths(m, config_path).validation_report)) == "pass"
         )
-        st.caption(f"📊 Status: {validated}/{len(batch_models)} validated")
+        st.caption(f"Status: {validated}/{len(batch_models)} validated")
 
-        if st.button("▶️ Run all batch models", use_container_width=True):
-            from perplex_workbench.gui.streamlit_app import run_streamlit_command
+        batch_projects = [str(model["project"]) for model in batch_models]
+        projects_to_run = st.multiselect(
+            "Batch models to run",
+            options=batch_projects,
+            default=[],
+            help="Choose which generated batch variants to run through BUILD/VERTEX/WERAMI.",
+        )
+        if not projects_to_run:
+            st.info("Select at least one batch model to run.")
+        if st.button("Run selected batch model(s)", disabled=not projects_to_run, use_container_width=True):
+            from perplex_workbench.gui.streamlit_app import relabel_command, run_streamlit_commands
 
-            command = full_pipeline_command(config_path)
-            run_streamlit_command(command)
+            commands = [
+                relabel_command(full_pipeline_command(config_path, project=project), f"Run pipeline: {project}")
+                for project in projects_to_run
+            ]
+            run_streamlit_commands(commands)
 
     # Results matrix
     if batch_models:

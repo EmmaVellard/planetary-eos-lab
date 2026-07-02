@@ -35,6 +35,9 @@ PROPERTY_OPTIONS = {
     },
 }
 GRID_ONLY_OPTION = "None (grid only)"
+HEATMAP_DISPLAY = "Heatmap"
+GRID_POINT_DISPLAY = "Grid points"
+PHASE_MODEL_SELECTOR_KEY = "phase_diagram_project"
 
 
 def property_points_from_tab(tab_path: Path, property_choice: str) -> tuple[list[float], list[float], list[float], dict[str, str]]:
@@ -63,6 +66,38 @@ def property_points_from_tab(tab_path: Path, property_choice: str) -> tuple[list
     return t_points, p_points, property_values, property_config
 
 
+def property_grid_from_tab(
+    tab_path: Path,
+    property_choice: str,
+) -> tuple[list[float], list[float], list[list[float | None]], int, dict[str, str]]:
+    """Read gridded P-T-property values from a PlanetProfile table."""
+    from validate_tab import column_indices, read_tab
+
+    property_config = PROPERTY_OPTIONS[property_choice]
+    tab = read_tab(tab_path)
+    indices = column_indices(tab.headers)
+    p_index = indices["p_bar"]
+    t_index = indices["t_k"]
+    property_index = indices[property_config["canonical"]]
+
+    values_by_point: dict[tuple[float, float], float] = {}
+    for row in tab.rows:
+        pressure = row[p_index]
+        temperature = row[t_index]
+        value = row[property_index]
+        if abs(pressure) < 1e90 and abs(temperature) < 1e90 and abs(value) < 1e90:
+            values_by_point[(temperature, pressure * 1e-4)] = value
+
+    temperatures = sorted({temperature for temperature, _ in values_by_point})
+    pressures = sorted({pressure for _, pressure in values_by_point})
+    z_values = [
+        [values_by_point.get((temperature, pressure)) for temperature in temperatures]
+        for pressure in pressures
+    ]
+
+    return temperatures, pressures, z_values, len(values_by_point), property_config
+
+
 def grid_points_from_tab(tab_path: Path) -> tuple[list[float], list[float]]:
     """Read P-T grid points from a PlanetProfile table."""
     from validate_tab import column_indices, read_tab
@@ -88,6 +123,7 @@ def plot_phase_diagram_interactive(
     model: dict[str, Any],
     output_dir: Path,
     property_choice: str = "Density",
+    display_mode: str = HEATMAP_DISPLAY,
 ):
     """Create interactive P-T phase diagram with Plotly.
 
@@ -124,20 +160,49 @@ def plot_phase_diagram_interactive(
 
     fig = go.Figure()
 
+    point_count = 0
     try:
         if property_choice in PROPERTY_OPTIONS:
-            t_points, p_points, property_values, property_config = property_points_from_tab(
-                tab_path,
-                property_choice,
-            )
-            if not property_values:
-                st.warning(f"No finite values found for {property_choice}; showing P-T grid only.")
-                t_points, p_points = grid_points_from_tab(tab_path)
-                property_choice = GRID_ONLY_OPTION
+            if display_mode == HEATMAP_DISPLAY:
+                temperatures, pressures, z_values, point_count, property_config = property_grid_from_tab(
+                    tab_path,
+                    property_choice,
+                )
+                if not point_count:
+                    st.warning(f"No finite values found for {property_choice}; showing P-T grid only.")
+                    t_points, p_points = grid_points_from_tab(tab_path)
+                    property_choice = GRID_ONLY_OPTION
+                else:
+                    fig.add_trace(
+                        go.Heatmap(
+                            x=temperatures,
+                            y=pressures,
+                            z=z_values,
+                            colorscale=property_config["colorscale"],
+                            colorbar=dict(title=property_config["colorbar"]),
+                            name=property_config["label"],
+                            hovertemplate="<b>P-T cell</b><br>"
+                            + "T: %{x:.0f} K<br>"
+                            + "P: %{y:.2f} GPa<br>"
+                            + f"{property_config['label']}: "
+                            + f"%{{z:.3g}} {property_config['unit']}<extra></extra>",
+                        )
+                    )
+            else:
+                t_points, p_points, property_values, property_config = property_points_from_tab(
+                    tab_path,
+                    property_choice,
+                )
+                point_count = len(property_values)
+                if not property_values:
+                    st.warning(f"No finite values found for {property_choice}; showing P-T grid only.")
+                    t_points, p_points = grid_points_from_tab(tab_path)
+                    property_choice = GRID_ONLY_OPTION
         else:
             t_points, p_points = grid_points_from_tab(tab_path)
+            point_count = len(p_points)
 
-        if property_choice in PROPERTY_OPTIONS:
+        if property_choice in PROPERTY_OPTIONS and display_mode != HEATMAP_DISPLAY:
             fig.add_trace(
                 go.Scatter(
                     x=t_points,
@@ -159,16 +224,17 @@ def plot_phase_diagram_interactive(
                 )
             )
         else:
-            fig.add_trace(
-                go.Scatter(
-                    x=t_points,
-                    y=p_points,
-                    mode="markers",
-                    marker=dict(size=6, color="blue", opacity=0.6),
-                    name="P-T Grid",
-                    hovertemplate="T: %{x:.0f} K<br>P: %{y:.2f} GPa<extra></extra>",
+            if property_choice == GRID_ONLY_OPTION:
+                fig.add_trace(
+                    go.Scatter(
+                        x=t_points,
+                        y=p_points,
+                        mode="markers",
+                        marker=dict(size=6, color="blue", opacity=0.6),
+                        name="P-T Grid",
+                        hovertemplate="T: %{x:.0f} K<br>P: %{y:.2f} GPa<extra></extra>",
+                    )
                 )
-            )
 
     except Exception as e:
         st.error(f"❌ Error reading output file: {e}")
@@ -192,15 +258,15 @@ def plot_phase_diagram_interactive(
     col1, col2, col3 = st.columns(3)
     col1.metric("T range", f"{min(temperatures_k):.0f}–{max(temperatures_k):.0f} K")
     col2.metric("P range", f"{min(pressures_bar)*1e-4:.2f}–{max(pressures_bar)*1e-4:.2f} GPa")
-    col3.metric("Grid points", len(p_points))
+    col3.metric("Grid points", point_count)
 
     st.info(
-        "**Note**: Full phase diagrams with phase boundaries require additional VERTEX configuration. "
-        "This plot shows the P-T coverage and property distribution from WERAMI output."
+        "Full phase diagrams with phase boundaries require additional VERTEX configuration. "
+        "This plot shows the P-T grid and property distribution from WERAMI output."
     )
 
 
-def show_phase_diagram_panel(models: list[dict[str, Any]], selected_project: str, config_path: Path):
+def show_phase_diagram_panel(models: list[dict[str, Any]], selected_project: str | None, config_path: Path):
     """Render phase diagram panel in GUI.
 
     Args:
@@ -208,6 +274,31 @@ def show_phase_diagram_panel(models: list[dict[str, Any]], selected_project: str
         selected_project: Currently selected project
         config_path: Path to config file
     """
+    project_options = [str(model.get("project", "")) for model in models if model.get("project")]
+    if not project_options:
+        st.info("No saved models are available to plot.")
+        return
+    selected_project = selected_project if selected_project in project_options else None
+    stored_project = st.session_state.get(PHASE_MODEL_SELECTOR_KEY)
+    if stored_project not in project_options:
+        st.session_state.pop(PHASE_MODEL_SELECTOR_KEY, None)
+        if selected_project:
+            st.session_state[PHASE_MODEL_SELECTOR_KEY] = selected_project
+
+    selectbox_kwargs: dict[str, Any] = {
+        "label": "Saved model to plot",
+        "options": project_options,
+        "placeholder": "Choose a saved model",
+        "format_func": lambda project: f"{project}",
+        "key": PHASE_MODEL_SELECTOR_KEY,
+    }
+    if PHASE_MODEL_SELECTOR_KEY not in st.session_state:
+        selectbox_kwargs["index"] = None
+    selected_project = st.selectbox(**selectbox_kwargs)
+    if not selected_project or selected_project not in project_options:
+        st.info("Select a saved model to display a phase/property plot.")
+        return
+
     st.subheader(f"Phase Diagram: {selected_project}")
 
     selected_model = next((m for m in models if m["project"] == selected_project), None)
@@ -232,5 +323,16 @@ def show_phase_diagram_panel(models: list[dict[str, Any]], selected_project: str
             horizontal=True,
             label_visibility="collapsed",
         )
+        display_mode = st.radio(
+            "Display",
+            [HEATMAP_DISPLAY, GRID_POINT_DISPLAY],
+            horizontal=True,
+            help="Heatmap shows gridded property values; grid points show the raw sampled WERAMI rows.",
+        )
 
-    plot_phase_diagram_interactive(selected_model, output_dir, property_choice=prop_choice)
+    plot_phase_diagram_interactive(
+        selected_model,
+        output_dir,
+        property_choice=prop_choice,
+        display_mode=display_mode,
+    )

@@ -13,7 +13,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 import streamlit as st
+import streamlit.components.v1 as components
 
+import plot_comparisons
+import run_perplex
 from perplex_workbench.core.config_io import (
     DEFAULT_CONFIG_PATH,
     EXAMPLE_CONFIG_PATH,
@@ -36,7 +39,6 @@ from perplex_workbench.gui.database_selector import (
 )
 from perplex_workbench.gui.import_export import show_import_export_panel
 from perplex_workbench.gui.phase_diagram import show_phase_diagram_panel
-from perplex_workbench.gui.validation_enhanced import show_enhanced_validation
 from perplex_workbench.core.database_utils import get_database_components
 from perplex_workbench.core.model_schema import (
     OXIDE_ORDER,
@@ -56,7 +58,6 @@ from perplex_workbench.core.pipeline_runner import (
     generate_compositions_command,
 )
 from perplex_workbench.core.validation_summary import (
-    comparison_plot_paths,
     export_manifest_path,
     export_manifest_table_rows,
     model_output_paths,
@@ -68,17 +69,26 @@ from perplex_workbench.core.validation_summary import (
 
 st.set_page_config(page_title="Perple_X Workbench", layout="wide")
 
+DEFAULT_PLANETPROFILE_EXPORT_DIR = REPO_ROOT / "outputs" / "planetprofile_export"
 COMPOSITION_BUILDER_MODE = "Build Composition"
 PIPELINE_MODE = "Run Pipeline"
 BATCH_PROCESSING_MODE = "Batch Processing"
 COMPARISON_MODE = "Compare Models"
+PIPELINE_STEP_CONTROL_KEY = "pipeline_step_radio"
+PIPELINE_SELECTION_KEY = "pipeline_selected_projects"
+PIPELINE_MODEL_SELECTOR_KEYS = [
+    PIPELINE_SELECTION_KEY,
+    "generate_model_projects",
+    "run_model_projects",
+    "step5_plot_projects",
+    "export_model_projects",
+]
 
 PIPELINE_STEPS = [
-    "1. Setup & Select Model",
-    "2. Review",
-    "3. Generate Files",
-    "4. Run Perple_X",
-    "5. Validate / Export",
+    "1. Setup & Select Models",
+    "2. Generate Files",
+    "3. Run Perple_X",
+    "4. Validate / Export",
 ]
 
 
@@ -112,6 +122,42 @@ def inject_styles() -> None:
             border-color: #c43d50;
             color: #ffffff;
         }
+        section[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] {
+            display: flex;
+            flex-direction: column;
+            gap: 0.1rem;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label {
+            width: 100%;
+            padding: 0.38rem 0.15rem 0.32rem 0;
+            border-bottom: 2px solid transparent;
+            border-radius: 0;
+            color: #31333f;
+            font-weight: 600;
+            transition: border-color 120ms ease, color 120ms ease;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:hover {
+            background: transparent;
+            border-bottom-color: var(--primary-color, #d84b5b);
+            color: var(--primary-color, #d84b5b);
+            font-weight: 700;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:hover * {
+            color: var(--primary-color, #d84b5b);
+            font-weight: 700;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) {
+            border-bottom-color: var(--primary-color, #d84b5b);
+            color: var(--primary-color, #d84b5b);
+            font-weight: 700;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label:has(input:checked) * {
+            color: var(--primary-color, #d84b5b);
+            font-weight: 700;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stRadio"] [role="radiogroup"] label > div:first-child {
+            display: none;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -139,16 +185,78 @@ def model_label(model: dict[str, Any]) -> str:
     return f"{project} ({status})"
 
 
+def project_options(models: list[dict[str, Any]]) -> list[str]:
+    return [str(model.get("project", "")) for model in models if model.get("project")]
+
+
+def valid_project_selection(projects: Any, available_projects: list[str]) -> list[str]:
+    if isinstance(projects, str):
+        candidates = [projects]
+    elif isinstance(projects, (list, tuple, set)):
+        candidates = [str(project) for project in projects]
+    else:
+        candidates = []
+    available = set(available_projects)
+    return [project for project in candidates if project in available]
+
+
+def sync_model_selection(source_key: str, available_projects: list[str]) -> None:
+    selected_projects = valid_project_selection(st.session_state.get(source_key), available_projects)
+    for key in PIPELINE_MODEL_SELECTOR_KEYS:
+        if key != source_key:
+            st.session_state[key] = selected_projects
+
+
+def seed_model_selector_state(widget_key: str, available_projects: list[str]) -> None:
+    shared_selection = valid_project_selection(st.session_state.get(PIPELINE_SELECTION_KEY), available_projects)
+    if widget_key in st.session_state:
+        widget_selection = valid_project_selection(st.session_state[widget_key], available_projects)
+        if widget_key != PIPELINE_SELECTION_KEY and shared_selection and widget_selection != shared_selection:
+            st.session_state[widget_key] = shared_selection
+        else:
+            st.session_state[widget_key] = widget_selection
+        return
+    st.session_state[widget_key] = shared_selection
+
+
+def current_pipeline_selection(available_projects: list[str]) -> list[str]:
+    return valid_project_selection(st.session_state.get(PIPELINE_SELECTION_KEY), available_projects)
+
+
+def models_for_projects(models: list[dict[str, Any]], selected_projects: list[str]) -> list[dict[str, Any]]:
+    if not selected_projects:
+        return models
+    selected = set(selected_projects)
+    return [model for model in models if str(model.get("project", "")) in selected]
+
+
+def model_by_project(models: list[dict[str, Any]], project: str) -> dict[str, Any] | None:
+    return next((model for model in models if model.get("project") == project), None)
+
+
+def selected_project_names(selected_project: str | list[str] | tuple[str, ...] | set[str] | None) -> set[str]:
+    if selected_project is None:
+        return set()
+    if isinstance(selected_project, str):
+        return {selected_project} if selected_project else set()
+    return {str(project) for project in selected_project if project}
+
+
+def relabel_command(command: PipelineCommand, label: str) -> PipelineCommand:
+    return PipelineCommand(label=label, command=command.command, cwd=command.cwd)
+
+
 def active_component_text(database: str) -> str:
     return " ".join(component for _, component in get_database_components(database))
 
 
 def compact_model_overview_rows(
     models: list[dict[str, Any]],
-    selected_project: str | None = None,
+    selected_project: str | list[str] | tuple[str, ...] | set[str] | None = None,
     database: str = "stx21",
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    selected_projects = selected_project_names(selected_project)
     for model in models:
         project = str(model.get("project", ""))
         validation = validate_model_entry(model)
@@ -162,7 +270,7 @@ def compact_model_overview_rows(
             omitted = "unknown"
         rows.append(
             {
-                "selected": "yes" if project == selected_project else "",
+                "selected": "yes" if project in selected_projects else "",
                 "project": project,
                 "description": str(model.get("description", "")),
                 "status": str(model.get("scientific_status", "")),
@@ -178,10 +286,11 @@ def compact_model_overview_rows(
 
 def detailed_model_overview_rows(
     models: list[dict[str, Any]],
-    selected_project: str | None = None,
+    selected_project: str | list[str] | tuple[str, ...] | set[str] | None = None,
     database: str = "stx21",
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
+    selected_projects = selected_project_names(selected_project)
     for model in models:
         project = str(model.get("project", ""))
         validation = validate_model_entry(model)
@@ -202,7 +311,7 @@ def detailed_model_overview_rows(
         if not isinstance(source_composition, dict):
             source_composition = {}
         row: dict[str, Any] = {
-            "selected for run": "yes" if project == selected_project else "",
+            "selected for run": "yes" if project in selected_projects else "",
             "project": project,
             "description": str(model.get("description", "")),
             "scientific status": str(model.get("scientific_status", "")),
@@ -259,9 +368,36 @@ def show_oxide_table(rows: list[dict[str, Any]], database: str = "stx21") -> Non
     )
 
 
+def show_selected_model_reviews(
+    models: list[dict[str, Any]],
+    selected_projects: list[str],
+    database: str,
+) -> None:
+    if not selected_projects:
+        st.info("Select one or more saved models to review their composition before generating files.")
+        return
+
+    for project in selected_projects:
+        model = model_by_project(models, project)
+        if model is None:
+            continue
+        with st.expander(f"{project}: composition review", expanded=len(selected_projects) == 1):
+            show_scientific_guardrail(model, database=database)
+            st.metric("Input oxide total, wt%", f"{raw_total(model):.2f}")
+            show_oxide_table(oxide_table_rows(model, database=database), database=database)
+            st.caption(f"Active {database} BUILD components")
+            st.code(active_component_text(database), language="text")
+            omitted = omitted_oxides_for_model(model, database=database)
+            if omitted:
+                st.warning(
+                    f"These oxides are present in the composition record but omitted from {database} BUILD: "
+                    + ", ".join(str(item["oxide"]) for item in omitted)
+                )
+
+
 def show_model_catalog(
     models: list[dict[str, Any]],
-    selected_project: str | None = None,
+    selected_project: str | list[str] | tuple[str, ...] | set[str] | None = None,
     database: str = "stx21",
 ) -> None:
     st.dataframe(
@@ -338,7 +474,7 @@ def delete_model_panel(
     config_path: Path,
     config: dict[str, Any],
     models: list[dict[str, Any]],
-    selected_project: str,
+    selected_project: str | None = None,
 ) -> None:
     st.subheader("Delete Saved Model(s)")
     st.caption(
@@ -349,12 +485,11 @@ def delete_model_panel(
         st.warning("At least one saved model must remain in the config.")
         return
 
-    project_options = [str(model.get("project", "")) for model in models]
-    default_projects = [selected_project] if selected_project in project_options else []
+    available_projects = project_options(models)
     projects_to_delete = st.multiselect(
         "Saved models to delete",
-        options=project_options,
-        default=default_projects,
+        options=available_projects,
+        default=[],
         key="delete_model_projects",
         format_func=lambda project: model_label(next(model for model in models if model.get("project") == project)),
     )
@@ -378,14 +513,22 @@ def set_workflow_step(index: int) -> None:
     bounded = max(0, min(index, len(PIPELINE_STEPS) - 1))
     st.session_state["workflow_step_index"] = bounded
     st.session_state["workflow_step_choice"] = PIPELINE_STEPS[bounded]
+    st.session_state[PIPELINE_STEP_CONTROL_KEY] = PIPELINE_STEPS[bounded]
+
+
+def set_workflow_step_from_control() -> None:
+    selected_step = st.session_state.get(PIPELINE_STEP_CONTROL_KEY)
+    if selected_step in PIPELINE_STEPS:
+        set_workflow_step(PIPELINE_STEPS.index(str(selected_step)))
 
 
 def set_workspace_mode(mode: str) -> None:
     st.session_state["workspace_mode"] = mode
 
 
-def run_streamlit_command(command: PipelineCommand) -> None:
-    status = st.status(f"Running {command.label}...", state="running", expanded=True)
+def run_streamlit_command(command: PipelineCommand, *, progress_label: str | None = None) -> bool:
+    label = progress_label or command.label
+    status = st.status(f"... {label}", state="running", expanded=True)
     with status:
         st.caption("Command")
         st.code(command.display, language="bash")
@@ -401,10 +544,10 @@ def run_streamlit_command(command: PipelineCommand) -> None:
             bufsize=1,
         )
     except OSError as exc:
-        status.update(label=f"Could not start {command.label}", state="error", expanded=True)
+        status.update(label=f"Could not start: {label}", state="error", expanded=True)
         with status:
             st.error(f"Could not start command: {exc}")
-        return
+        return False
 
     assert process.stdout is not None
     for line in process.stdout:
@@ -413,11 +556,30 @@ def run_streamlit_command(command: PipelineCommand) -> None:
     returncode = process.wait()
     output_box.code("".join(output_lines), language="text")
     if returncode == 0:
-        status.update(label=f"Complete: {command.label}", state="complete", expanded=False)
-    else:
-        status.update(label=f"Failed: {command.label}", state="error", expanded=True)
-        with status:
-            st.error(f"Command failed with return code {returncode}.")
+        status.update(label=f"Complete: {label}", state="complete", expanded=False)
+        return True
+
+    status.update(label=f"Failed: {label}", state="error", expanded=True)
+    with status:
+        st.error(f"Command failed with return code {returncode}.")
+    return False
+
+
+def run_streamlit_commands(commands: list[PipelineCommand]) -> None:
+    total = len(commands)
+    completed = 0
+    for index, command in enumerate(commands, start=1):
+        remaining = total - index
+        suffix = f"{remaining} left" if remaining else "last run"
+        ok = run_streamlit_command(
+            command,
+            progress_label=f"{index}/{total} {command.label} ({suffix})",
+        )
+        if not ok:
+            st.error(f"Stopped after {completed}/{total} completed run(s).")
+            return
+        completed += 1
+    st.success(f"Finished {completed}/{total} run(s).")
 
 
 def editable_model_form(config_path: Path, config: dict[str, Any], model: dict[str, Any]) -> None:
@@ -718,55 +880,118 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
     return edited if validation.ok else base_model
 
 
-def show_outputs(config_path: Path, models: list[dict[str, Any]], export_dir: str) -> None:
-    for model in models:
+def show_selected_comparison_plots(config_path: Path, models: list[dict[str, Any]]) -> None:
+    available_projects = project_options(models)
+    seed_model_selector_state("step5_plot_projects", available_projects)
+    projects_to_plot = st.multiselect(
+        "Compositions to display in plots",
+        options=available_projects,
+        key="step5_plot_projects",
+        on_change=sync_model_selection,
+        args=("step5_plot_projects", available_projects),
+        format_func=lambda project: model_label(next(model for model in models if model.get("project") == project)),
+        help="Choose which saved compositions/models are drawn in the comparison plots below.",
+    )
+    if not projects_to_plot:
+        st.info("Select at least one composition to display in the plots.")
+        return
+
+    try:
+        config = run_perplex.load_config(config_path)
+        plot_models = plot_comparisons.selected_plot_models(config, projects_to_plot)
+        components.html(plot_comparisons.composition_plot_svg(plot_models), height=585, scrolling=False)
+        try:
+            components.html(plot_comparisons.property_plot_svg(plot_models), height=925, scrolling=False)
+        except (FileNotFoundError, ValueError) as exc:
+            st.info(f"Property comparison plot is unavailable for this selection: {exc}")
+    except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
+        st.warning(f"Could not render selected comparison plots: {exc}")
+
+
+def validation_display(status: str) -> tuple[str, str]:
+    if status == "pass":
+        return "✅", "PASS"
+    if status == "fail":
+        return "❌", "FAIL"
+    if status == "missing":
+        return "🕓", "NOT RUN"
+    return "⚠️", "UNKNOWN"
+
+
+def artifact_display(path: Path) -> tuple[str, str]:
+    return ("✅", "found") if path.exists() else ("❌", "missing")
+
+
+def show_outputs(
+    config_path: Path,
+    models: list[dict[str, Any]],
+    export_dir: str,
+    selected_projects: list[str],
+) -> None:
+    detail_rows: list[tuple[str, str, str | None, str | None, list[tuple[str, Path]]]] = []
+    display_models = models_for_projects(models, selected_projects)
+    if selected_projects:
+        st.caption(f"Showing validation and outputs for {len(display_models)} selected model(s).")
+    else:
+        st.info("No models are selected in the pipeline yet, so validation details show all saved models.")
+
+    for model in display_models:
         project = str(model.get("project", ""))
         if not project:
             continue
         paths = model_output_paths(model, config_path)
         report = read_text_if_exists(paths.validation_report)
         status = validation_status(report)
-        with st.expander(f"{project}: validation {status}"):
+        output_rows = [
+            ("raw WERAMI table", paths.raw_werami_table),
+            ("PlanetProfile table", paths.planetprofile_table),
+            ("native PlanetProfile table", paths.native_planetprofile_table),
+            ("build log", paths.build_log),
+            ("vertex log", paths.vertex_log),
+            ("werami log", paths.werami_log),
+        ]
+        detail_rows.append((project, status, report, read_text_if_exists(paths.oxide_omissions), output_rows))
+
+    status_counts = {"pass": 0, "fail": 0, "missing": 0, "unknown": 0}
+    for _, status, _, _, _ in detail_rows:
+        status_counts[status if status in status_counts else "unknown"] += 1
+    count_cols = st.columns(4)
+    count_cols[0].metric("✅ Passed", status_counts["pass"])
+    count_cols[1].metric("❌ Failed", status_counts["fail"])
+    count_cols[2].metric("🕓 Not run", status_counts["missing"])
+    count_cols[3].metric("⚠️ Unknown", status_counts["unknown"])
+
+    st.subheader("Plots")
+    show_selected_comparison_plots(config_path, models)
+
+    st.subheader("Validation Details")
+    for project, status, report, omissions, output_rows in detail_rows:
+        status_icon, status_label = validation_display(status)
+        with st.expander(f"{status_icon} {project} — {status_label}", expanded=status != "pass"):
             if status == "pass":
                 st.success("Validation status: PASS")
             elif status == "fail":
                 st.error("Validation status: FAIL")
             else:
                 st.info("Validation report is not available yet.")
-            if report:
-                st.code(report, language="text")
-            omissions = read_text_if_exists(paths.oxide_omissions)
             if omissions:
                 st.warning(omissions)
-
-            output_rows = [
-                ("raw WERAMI table", paths.raw_werami_table),
-                ("PlanetProfile table", paths.planetprofile_table),
-                ("native PlanetProfile table", paths.native_planetprofile_table),
-                ("build log", paths.build_log),
-                ("vertex log", paths.vertex_log),
-                ("werami log", paths.werami_log),
-            ]
-            st.dataframe(
-                [
-                    {"artifact": label, "path": str(path), "exists": path.exists()}
-                    for label, path in output_rows
-                ],
-                width="stretch",
-                hide_index=True,
-            )
-
-    st.subheader("Plots")
-    for label, path in comparison_plot_paths(config_path).items():
-        st.write(f"{label}: `{path}`")
-        if path.exists():
-            st.image(str(path))
+            st.caption("Artifacts")
+            for label, path in output_rows:
+                artifact_icon, artifact_status = artifact_display(path)
+                st.write(f"{artifact_icon} **{label}** ({artifact_status})")
+                st.code(str(path), language="text")
+            if report:
+                st.caption("Validation report text")
+                st.code(report, language="text")
 
     manifest_path = export_manifest_path(config_path, export_dir)
-    st.subheader("Export manifest")
-    st.write(f"`{manifest_path}`")
-    manifest = read_export_manifest(manifest_path)
-    if manifest:
+    with st.expander("Export manifest (optional provenance)", expanded=False):
+        st.write(f"`{manifest_path}`")
+        manifest = read_export_manifest(manifest_path)
+        if not manifest:
+            st.info("No export manifest has been written yet.")
+            return
         st.warning("Export success does not imply scientific readiness.")
         st.caption(
             "PlanetProfile does not need this manifest to read a table. It is a provenance receipt "
@@ -775,8 +1000,8 @@ def show_outputs(config_path: Path, models: list[dict[str, Any]], export_dir: st
         rows = export_manifest_table_rows(manifest)
         if rows:
             st.dataframe(rows, width="stretch", hide_index=True)
-        with st.expander("Raw JSON manifest"):
-            st.json(manifest)
+        st.caption("Raw JSON manifest")
+        st.json(manifest)
 
 
 def main() -> None:
@@ -791,11 +1016,13 @@ def main() -> None:
         st.session_state["workspace_mode"] = PIPELINE_MODE
     if "workflow_step_index" not in st.session_state:
         set_workflow_step(0)
+    else:
+        set_workflow_step(int(st.session_state.get("workflow_step_index", 0)))
 
     with st.sidebar:
         st.header("Workspace")
         st.caption("Main task")
-        for mode in [PIPELINE_MODE, COMPOSITION_BUILDER_MODE, BATCH_PROCESSING_MODE, COMPARISON_MODE]:
+        for mode in [COMPOSITION_BUILDER_MODE, BATCH_PROCESSING_MODE, PIPELINE_MODE, COMPARISON_MODE]:
             st.button(
                 mode,
                 key=f"workspace_mode_{mode}",
@@ -808,16 +1035,16 @@ def main() -> None:
         step = st.session_state.get("workflow_step_choice", PIPELINE_STEPS[0])
         if workspace_mode == PIPELINE_MODE:
             step_index = int(st.session_state.get("workflow_step_index", 0))
-            st.caption("Pipeline steps")
-            for index, pipeline_step in enumerate(PIPELINE_STEPS):
-                st.button(
-                    pipeline_step,
-                    key=f"pipeline_step_{index}",
-                    type="primary" if step_index == index else "secondary",
-                    on_click=set_workflow_step,
-                    args=(index,),
-                    width="stretch",
-                )
+            if PIPELINE_STEP_CONTROL_KEY not in st.session_state:
+                st.session_state[PIPELINE_STEP_CONTROL_KEY] = PIPELINE_STEPS[step_index]
+            st.radio(
+                "Pipeline steps",
+                options=PIPELINE_STEPS,
+                key=PIPELINE_STEP_CONTROL_KEY,
+                on_change=set_workflow_step_from_control,
+                width="stretch",
+            )
+            step_index = int(st.session_state.get("workflow_step_index", 0))
             nav_col1, nav_col2 = st.columns(2)
             with nav_col1:
                 st.button(
@@ -837,7 +1064,7 @@ def main() -> None:
                 )
             step = str(st.session_state.get("workflow_step_choice", PIPELINE_STEPS[0]))
         else:
-            st.caption("Create or edit a saved model, then switch to Run Pipeline when you are ready.")
+            st.caption("Create or edit saved models, then switch to Run Pipeline when you are ready.")
         st.divider()
 
         # Auto-save controls
@@ -850,7 +1077,7 @@ def main() -> None:
     config_path = resolve_path(config_input, REPO_ROOT)
 
     if not config_path.exists():
-        st.header("Create Local Config" if workspace_mode == COMPOSITION_BUILDER_MODE else "Step 1. Setup & Select Model")
+        st.header("Create Local Config" if workspace_mode == COMPOSITION_BUILDER_MODE else "Step 1. Setup & Select Models")
         st.write(f"Current working directory: `{Path.cwd()}`")
         st.write(f"Repository root: `{REPO_ROOT}`")
         st.write(f"Resolved config path: `{config_path}`")
@@ -871,38 +1098,26 @@ def main() -> None:
         st.error("No models are configured.")
         return
     current_database = get_current_database(config)
+    available_projects = project_options(models)
+    for selector_key in PIPELINE_MODEL_SELECTOR_KEYS:
+        seed_model_selector_state(selector_key, available_projects)
+    if not st.session_state.get("planetprofile_export_dir"):
+        st.session_state["planetprofile_export_dir"] = str(DEFAULT_PLANETPROFILE_EXPORT_DIR)
 
-    with st.sidebar:
-        st.caption("Saved model used by review, generate, run, and export steps")
-        selected_project = st.selectbox(
-            "Selected saved model",
-            options=[str(model.get("project", "")) for model in models],
-            format_func=lambda project: model_label(next(model for model in models if model.get("project") == project)),
-            help=(
-                "This is the saved model in configs/models.json that the later pipeline buttons use. "
-                "If you create or edit a model in the Composition Builder, save it first, then select it here."
-            ),
-        )
-        export_dir = st.text_input(
-            "PlanetProfile export directory",
-            value=str(REPO_ROOT / "outputs" / "planetprofile_export"),
-        )
-
-    selected_model = next(model for model in models if model.get("project") == selected_project)
+    export_dir = str(st.session_state.get("planetprofile_export_dir", REPO_ROOT / "outputs" / "planetprofile_export"))
 
     if workspace_mode == COMPOSITION_BUILDER_MODE:
         composition_workspace(config_path, config, models)
         st.divider()
 
-        # Import/Export panel
-        with st.expander("📁 Import/Export Compositions"):
+        with st.expander("Import/Export Compositions"):
             show_import_export_panel(config_path, config)
 
         st.divider()
         st.subheader("Saved models")
-        show_model_catalog(models, selected_project, database=current_database)
+        show_model_catalog(models, database=current_database)
         with st.expander("Delete saved model(s)"):
-            delete_model_panel(config_path, config, models, selected_project)
+            delete_model_panel(config_path, config, models)
         return
 
     if workspace_mode == BATCH_PROCESSING_MODE:
@@ -913,18 +1128,11 @@ def main() -> None:
         show_comparison_workspace(models, config_path)
         return
 
-    if step == "1. Setup & Select Model":
-        st.header("Step 1. Setup & Select Model")
+    if step == "1. Setup & Select Models":
+        st.header("Step 1. Setup & Select Models")
         st.write(f"Current working directory: `{Path.cwd()}`")
         st.write(f"Repository root: `{REPO_ROOT}`")
         st.write(f"Resolved config path: `{config_path}`")
-        st.subheader("Saved model selected for the pipeline")
-        st.success(f"The next steps will use `{selected_project}`.")
-        st.caption(
-            "Use the sidebar selector to switch between saved models. "
-            "To create or edit a source composition, switch the sidebar main task to Build Composition."
-        )
-        show_scientific_guardrail(selected_model, database=current_database)
 
         st.subheader("Configuration")
         config_col1, config_col2 = st.columns([1, 1])
@@ -942,43 +1150,39 @@ def main() -> None:
         with config_col2:
             st.caption("Thermodynamic Database")
             current_database = show_database_selector(config, config_path)
+
+        st.subheader("Models for this pipeline session")
+        selected_projects = st.multiselect(
+            "Saved models to review",
+            options=available_projects,
+            key=PIPELINE_SELECTION_KEY,
+            on_change=sync_model_selection,
+            args=(PIPELINE_SELECTION_KEY, available_projects),
+            format_func=lambda project: model_label(next(model for model in models if model.get("project") == project)),
+            help="Choose one or more saved model entries from configs/models.json.",
+        )
+        if selected_projects:
+            st.success(f"Selected {len(selected_projects)} model(s) for review.")
+        show_selected_model_reviews(models, selected_projects, database=current_database)
+
         st.subheader("Saved model catalog")
         st.caption(
-            "Use this table to compare saved compositions before running the pipeline. "
-            "The selected model is the one used by Review, Generate, Run, and Export."
+            "Use this table to compare saved compositions before generating files. "
+            "The selected marker only reflects the models selected above."
         )
-        show_model_catalog(models, selected_project, database=current_database)
+        show_model_catalog(models, selected_projects, database=current_database)
         with st.expander("Delete saved model(s)"):
-            delete_model_panel(config_path, config, models, selected_project)
+            delete_model_panel(config_path, config, models)
 
-    elif step == "2. Review":
-        database = get_current_database(config)
-        st.header("Step 2. Review")
-        st.subheader(selected_project)
-        show_scientific_guardrail(selected_model, database=database)
-        st.metric("Input oxide total, wt%", f"{raw_total(selected_model):.2f}")
-        review_rows = oxide_table_rows(selected_model, database=database)
-        st.dataframe(rounded_oxide_rows(review_rows, database=database), width="stretch", hide_index=True)
-        st.subheader(f"{database} BUILD Components")
-        st.code(active_component_text(database), language="text")
-        omitted = omitted_oxides_for_model(selected_model, database=database)
-        if omitted:
-            st.warning(
-                f"These oxides are present in the composition record but omitted from {database} BUILD: "
-                + ", ".join(str(item["oxide"]) for item in omitted)
-            )
-        st.info("Next step: generate composition files. This writes generated artifacts from the saved config.")
-
-    elif step == "3. Generate Files":
-        st.header("Step 3. Generate Files")
+    elif step == "2. Generate Files":
+        st.header("Step 2. Generate Files")
         st.write("This step runs `make_compositions.py` and writes generated files under `compositions/`.")
-        project_options = [str(model.get("project", "")) for model in models]
-        default_projects = [selected_project] if selected_project in project_options else project_options[:1]
         projects_to_generate = st.multiselect(
             "Saved models to generate",
-            options=project_options,
-            default=default_projects,
+            options=available_projects,
             key="generate_model_projects",
+            on_change=sync_model_selection,
+            args=("generate_model_projects", available_projects),
             format_func=lambda project: model_label(next(model for model in models if model.get("project") == project)),
             help="Choose one or more saved model entries from configs/models.json.",
         )
@@ -988,22 +1192,24 @@ def main() -> None:
         if not projects_to_generate:
             st.info("Select at least one saved model to generate.")
         if st.button("Generate selected file(s)", disabled=not projects_to_generate):
-            if len(projects_to_generate) == len(project_options):
-                run_streamlit_command(generate_compositions_command(config_path))
-            else:
-                for project in projects_to_generate:
-                    run_streamlit_command(generate_compositions_command(config_path, project))
+            commands = [
+                relabel_command(
+                    generate_compositions_command(config_path, project),
+                    f"Generate files: {project}",
+                )
+                for project in projects_to_generate
+            ]
+            run_streamlit_commands(commands)
 
-    elif step == "4. Run Perple_X":
-        st.header("Step 4. Run Perple_X")
+    elif step == "3. Run Perple_X":
+        st.header("Step 3. Run Perple_X")
         st.warning("Perple_X must be installed locally. The included lunar models are still smoke-test surface proxies.")
-        project_options = [str(model.get("project", "")) for model in models]
-        default_projects = [selected_project] if selected_project in project_options else project_options[:1]
         projects_to_run = st.multiselect(
             "Saved models to run",
-            options=project_options,
-            default=default_projects,
+            options=available_projects,
             key="run_model_projects",
+            on_change=sync_model_selection,
+            args=("run_model_projects", available_projects),
             format_func=lambda project: model_label(next(model for model in models if model.get("project") == project)),
             help="Choose one or more saved model entries from configs/models.json.",
         )
@@ -1017,57 +1223,81 @@ def main() -> None:
         if not projects_to_run:
             st.info("Select at least one saved model to run.")
         if st.button("Run selected model(s)", disabled=not projects_to_run):
-            if len(projects_to_run) == len(project_options):
-                run_streamlit_command(
+            commands = [
+                relabel_command(
                     full_pipeline_command(
                         config_path,
+                        project=project,
                         export_planetprofile=export_after_run,
                         export_dir=export_dir if export_after_run else None,
-                    )
+                    ),
+                    f"Run pipeline: {project}",
                 )
-            else:
-                for project in projects_to_run:
-                    run_streamlit_command(
-                        full_pipeline_command(
-                            config_path,
-                            project=project,
-                            export_planetprofile=export_after_run,
-                            export_dir=export_dir if export_after_run else None,
-                        )
-                    )
+                for project in projects_to_run
+            ]
+            run_streamlit_commands(commands)
 
-    elif step == "5. Validate / Export":
-        st.header("Step 5. Validate / Export")
+    elif step == "4. Validate / Export":
+        st.header("Step 4. Validate / Export")
 
-        # Tabs for different views
-        tab1, tab2, tab3 = st.tabs(["📊 Validation & Output", "📈 Phase Diagram", "📁 Export"])
+        tab1, tab2, tab3 = st.tabs(["Validation & Output", "Phase Diagram", "Export"])
 
         with tab1:
-            show_outputs(config_path, models, export_dir)
+            selected_projects = current_pipeline_selection(available_projects)
+            show_outputs(config_path, models, export_dir, selected_projects)
 
         with tab2:
-            show_phase_diagram_panel(models, selected_project, config_path)
+            selected_projects = current_pipeline_selection(available_projects)
+            phase_default = selected_projects[0] if selected_projects else None
+            show_phase_diagram_panel(models, phase_default, config_path)
 
         with tab3:
             st.subheader("PlanetProfile Export")
             st.warning("Export success does not imply scientific readiness.")
             st.caption(
-                "The export manifest is not required by PlanetProfile, but it is strongly useful as a readable "
-                "record of what was exported and which scientific caveats apply."
+                "Choose the saved models to export. PlanetProfile reads the `.tab` files directly; "
+                "the manifest is optional provenance for humans and scripts."
             )
-            st.subheader("Export selected saved model")
-            if st.button("Export selected model"):
-                run_streamlit_command(
-                    export_planetprofile_command(
-                        config_path,
-                        project=selected_project,
-                        export_dir=export_dir,
-                    )
+            planetprofile_export = st.checkbox(
+                "PlanetProfile export",
+                value=True,
+                help=(
+                    "Copy each native PlanetProfile-format table to a PlanetProfile-ready export folder "
+                    "using the filename configured for that model."
+                ),
+            )
+            if planetprofile_export:
+                export_dir = st.text_input(
+                    "PlanetProfile export directory",
+                    key="planetprofile_export_dir",
+                    help="Destination folder for the `.tab` files that can be copied into PlanetProfile.",
                 )
-            st.divider()
-            st.subheader("Export all saved models")
-            if st.button("Export all models"):
-                run_streamlit_command(export_planetprofile_command(config_path, export_dir=export_dir))
+            else:
+                st.info("Enable PlanetProfile export to copy generated `.tab` files to an export folder.")
+            projects_to_export = st.multiselect(
+                "Saved models to export",
+                options=available_projects,
+                key="export_model_projects",
+                on_change=sync_model_selection,
+                args=("export_model_projects", available_projects),
+                format_func=lambda project: model_label(next(model for model in models if model.get("project") == project)),
+                help="Choose one or more saved model entries from configs/models.json.",
+            )
+            if not projects_to_export:
+                st.info("Select at least one saved model to export.")
+            if st.button("Export selected model(s)", disabled=not projects_to_export or not planetprofile_export):
+                commands = [
+                    relabel_command(
+                        export_planetprofile_command(
+                            config_path,
+                            project=project,
+                            export_dir=export_dir,
+                        ),
+                        f"Export PlanetProfile table: {project}",
+                    )
+                    for project in projects_to_export
+                ]
+                run_streamlit_commands(commands)
 
 
 
