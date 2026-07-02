@@ -1,6 +1,6 @@
 ## Docker Usage Guide
 
-Run Perple_X Workbench in a Docker container for consistent, isolated environments.
+Run Planetary EOS Lab in a Docker container for consistent, isolated environments.
 
 ## Quick Start
 
@@ -12,7 +12,7 @@ Run Perple_X Workbench in a Docker container for consistent, isolated environmen
 
 1. **Build the image**
    ```bash
-   docker build -t perplex-workbench .
+   docker build -t planetary-eos-lab .
    ```
 
 2. **Run with GUI**
@@ -21,7 +21,7 @@ Run Perple_X Workbench in a Docker container for consistent, isolated environmen
      -v /path/to/your/perplex:/opt/perplex:ro \
      -v $(pwd)/outputs:/app/outputs \
      -v $(pwd)/compositions:/app/compositions \
-     perplex-workbench
+     planetary-eos-lab
    ```
 
 3. **Open browser**
@@ -85,7 +85,7 @@ docker run -p 8501:8501 \
   -e PERPLEX_DIR=/opt/perplex \
   -e PERPLEX_DATABASE=stx21 \
   -e PERPLEX_LOG_LEVEL=DEBUG \
-  perplex-workbench
+  planetary-eos-lab
 ```
 
 Available variables:
@@ -100,14 +100,14 @@ Available variables:
 docker run -it --rm \
   -v /path/to/perplex:/opt/perplex:ro \
   -v $(pwd)/outputs:/app/outputs \
-  perplex-workbench /bin/bash
+  planetary-eos-lab /bin/bash
 ```
 
 Then run commands:
 ```bash
-perplex-run --help
-perplex-make-compositions
-perplex-plot
+planetary-eos-run --help
+planetary-eos-compositions
+planetary-eos-plot
 ```
 
 ### One-off Commands
@@ -116,15 +116,15 @@ perplex-plot
 docker run --rm \
   -v /path/to/perplex:/opt/perplex:ro \
   -v $(pwd)/outputs:/app/outputs \
-  perplex-workbench \
-  perplex-make-compositions
+  planetary-eos-lab \
+  planetary-eos-compositions
 
 # Run pipeline
 docker run --rm \
   -v /path/to/perplex:/opt/perplex:ro \
   -v $(pwd)/outputs:/app/outputs \
-  perplex-workbench \
-  perplex-run --project moon_far_highlands_surface_proxy
+  planetary-eos-lab \
+  planetary-eos-run --project moon_far_highlands_surface_proxy
 ```
 
 ### Using docker-compose exec
@@ -133,8 +133,8 @@ docker run --rm \
 docker-compose up -d
 
 # Run CLI commands
-docker-compose exec perplex-cli perplex-run --help
-docker-compose exec perplex-cli perplex-make-compositions
+docker-compose exec perplex-cli planetary-eos-run --help
+docker-compose exec perplex-cli planetary-eos-compositions
 ```
 
 ## Multi-stage Builds (Advanced)
@@ -154,7 +154,7 @@ COPY --from=builder /wheels /wheels
 RUN pip install --no-cache-dir /wheels/*
 COPY . /app
 WORKDIR /app
-CMD ["perplex-gui"]
+CMD ["planetary-eos-gui"]
 ```
 
 ## Platform-Specific Notes
@@ -162,7 +162,7 @@ CMD ["perplex-gui"]
 ### macOS (Apple Silicon)
 ```bash
 # Build for x86_64 architecture
-docker build --platform linux/amd64 -t perplex-workbench .
+docker build --platform linux/amd64 -t planetary-eos-lab .
 ```
 
 ### Windows
@@ -170,14 +170,14 @@ Use forward slashes in volume paths:
 ```bash
 docker run -p 8501:8501 \
   -v C:/Users/YourName/perplex:/opt/perplex:ro \
-  perplex-workbench
+  planetary-eos-lab
 ```
 
 Or use WSL2 paths:
 ```bash
 docker run -p 8501:8501 \
   -v /mnt/c/Users/YourName/perplex:/opt/perplex:ro \
-  perplex-workbench
+  planetary-eos-lab
 ```
 
 ## Troubleshooting
@@ -185,7 +185,7 @@ docker run -p 8501:8501 \
 ### Container won't start
 Check logs:
 ```bash
-docker logs perplex-workbench
+docker logs planetary-eos-lab
 ```
 
 ### Perple_X not found
@@ -193,7 +193,7 @@ Verify mount:
 ```bash
 docker run --rm \
   -v /path/to/perplex:/opt/perplex \
-  perplex-workbench \
+  planetary-eos-lab \
   ls -la /opt/perplex
 ```
 
@@ -208,13 +208,13 @@ On Linux, ensure user has permissions:
 ```bash
 docker run --user $(id -u):$(id -g) \
   -v /path/to/perplex:/opt/perplex:ro \
-  perplex-workbench
+  planetary-eos-lab
 ```
 
 ### Port already in use
 Use different port:
 ```bash
-docker run -p 8502:8501 perplex-workbench
+docker run -p 8502:8501 planetary-eos-lab
 ```
 Then access at http://localhost:8502
 
@@ -226,7 +226,7 @@ Then access at http://localhost:8502
 
 2. Check health:
    ```bash
-   docker inspect --format='{{json .State.Health}}' perplex-workbench
+   docker inspect --format='{{json .State.Health}}' planetary-eos-lab
    ```
 
 3. Test locally:
@@ -259,7 +259,7 @@ server {
 ```yaml
 # docker-compose.yml with Caddy reverse proxy
 services:
-  perplex-workbench:
+  planetary-eos-lab:
     # ... same as before ...
 
   caddy:
@@ -272,7 +272,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - perplex-workbench
+      - planetary-eos-lab
 
 volumes:
   caddy_data:
@@ -282,7 +282,7 @@ volumes:
 ```
 # Caddyfile
 perplex.example.com {
-    reverse_proxy perplex-workbench:8501
+    reverse_proxy planetary-eos-lab:8501
 }
 ```
 
@@ -292,7 +292,7 @@ Limit CPU and memory usage:
 
 ```yaml
 services:
-  perplex-workbench:
+  planetary-eos-lab:
     # ... other config ...
     deploy:
       resources:
@@ -314,7 +314,7 @@ volumes:
   perplex_compositions:
 
 services:
-  perplex-workbench:
+  planetary-eos-lab:
     volumes:
       - perplex_outputs:/app/outputs
       - perplex_compositions:/app/compositions
@@ -325,7 +325,7 @@ services:
 Extend the base image:
 
 ```dockerfile
-FROM perplex-workbench:1.0
+FROM planetary-eos-lab:1.0
 
 # Add custom configurations
 COPY custom_configs/ /app/configs/
@@ -356,12 +356,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build image
-        run: docker build -t perplex-workbench:${{ github.ref_name }} .
+        run: docker build -t planetary-eos-lab:${{ github.ref_name }} .
 
       - name: Push to registry
         run: |
           echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-          docker push perplex-workbench:${{ github.ref_name }}
+          docker push planetary-eos-lab:${{ github.ref_name }}
 ```
 
 ## Security Best Practices
@@ -379,16 +379,16 @@ jobs:
 
 3. **Scan for vulnerabilities**
    ```bash
-   docker scan perplex-workbench
+   docker scan planetary-eos-lab
    ```
 
 4. **Use secrets properly**
    ```bash
-   docker run --secret id=myconfig,src=./config.json perplex-workbench
+   docker run --secret id=myconfig,src=./config.json planetary-eos-lab
    ```
 
 ## Getting Help
 
 - Docker issues: Check logs with `docker logs`
-- Perple_X Workbench issues: [GitHub Issues](https://github.com/EmmaVellard/perplex-workbench/issues)
+- Planetary EOS Lab issues: [GitHub Issues](https://github.com/EmmaVellard/planetary-eos-lab/issues)
 - Docker documentation: https://docs.docker.com/

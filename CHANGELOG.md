@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Perple_X Workbench will be documented in this file.
+All notable changes to Planetary EOS Lab will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
@@ -53,5 +53,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI running on Linux, macOS, and Windows
 - Python 3.9–3.12 compatibility testing
 
-[Unreleased]: https://github.com/EmmaVellard/perplex-workbench/compare/v1.0...HEAD
-[1.0]: https://github.com/EmmaVellard/perplex-workbench/releases/tag/v1.0
+[Unreleased]: https://github.com/EmmaVellard/planetary-eos-lab/compare/v1.0...HEAD
+[1.0]: https://github.com/EmmaVellard/planetary-eos-lab/releases/tag/v1.0

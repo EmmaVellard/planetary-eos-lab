@@ -1,13 +1,13 @@
-# Contributing to Perple_X Workbench
+# Contributing to Planetary EOS Lab
 
-Thank you for your interest in contributing to Perple_X Workbench! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to Planetary EOS Lab! This document provides guidelines and instructions for contributing.
 
 ## Quick Start for Contributors
 
 1. **Fork and clone the repository**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/perplex-workbench.git
-   cd perplex-workbench
+   git clone https://github.com/YOUR_USERNAME/planetary-eos-lab.git
+   cd planetary-eos-lab
    ```
 
 2. **Set up development environment**
@@ -49,7 +49,7 @@ Thank you for your interest in contributing to Perple_X Workbench! This document
    pytest tests/test_lunar_pipeline.py
    
    # Test the GUI locally
-   streamlit run perplex_workbench/gui/streamlit_app.py
+   streamlit run planetary_eos_lab/gui/streamlit_app.py
    ```
 
 4. **Commit with clear messages**
@@ -111,8 +111,8 @@ Thank you for your interest in contributing to Perple_X Workbench! This document
 ## Project Structure
 
 ```
-perplex-workbench/
-├── perplex_workbench/        # Main package
+planetary-eos-lab/
+├── planetary_eos_lab/        # Main package
 │   ├── core/                 # Core business logic
 │   │   ├── config_io.py      # Config file handling
 │   │   ├── model_schema.py   # Data validation and schemas
@@ -253,4 +253,4 @@ Contributors are listed in the GitHub contributors page. Significant contributio
 
 ---
 
-Thank you for making Perple_X Workbench better!
+Thank you for making Planetary EOS Lab better!

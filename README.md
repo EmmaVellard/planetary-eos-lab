@@ -1,10 +1,10 @@
-# Perple_X Workbench
+# 🪐 Planetary EOS Lab
 
-[![Tests](https://github.com/EmmaVellard/perplex-workbench/workflows/Tests/badge.svg)](https://github.com/EmmaVellard/perplex-workbench/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Tests](https://github.com/EmmaVellard/planetary-eos-lab/workflows/Tests/badge.svg)](https://github.com/EmmaVellard/planetary-eos-lab/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-b19cd9.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-b19cd9.svg)](https://www.python.org/downloads/)
 
-A GUI-first workflow for defining rock/planetary compositions, running Perple_X BUILD/VERTEX/WERAMI, validating outputs, and exporting PlanetProfile-ready EOS tables.
+A laboratory for planetary equation-of-state modeling with Perple_X and PlanetProfile integration.
 
 The included Moon near-side/far-side models are example smoke tests. They are useful for checking the workflow, not publication-ready lunar mantle compositions. For composition provenance and caveats, see [composition.md](composition.md).
 
@@ -19,25 +19,25 @@ The included Moon near-side/far-side models are example smoke tests. They are us
 
 **Option 1: From PyPI (when published)**
 ```bash
-pip install perplex-workbench
-perplex-gui
+pip install planetary-eos-lab
+planetary-eos-gui
 ```
 
 **Option 2: From source**
 ```bash
-git clone https://github.com/EmmaVellard/perplex-workbench.git
-cd perplex-workbench
+git clone https://github.com/EmmaVellard/planetary-eos-lab.git
+cd planetary-eos-lab
 pip install -e .
-perplex-gui
+planetary-eos-gui
 ```
 
 **Option 3: Development install**
 ```bash
-git clone https://github.com/EmmaVellard/perplex-workbench.git
-cd perplex-workbench
+git clone https://github.com/EmmaVellard/planetary-eos-lab.git
+cd planetary-eos-lab
 pip install -e ".[dev]"
 pytest  # Run tests
-perplex-gui
+planetary-eos-gui
 ```
 
 ### First-Time Setup
@@ -53,8 +53,8 @@ perplex-gui
 
 3. **Launch the GUI**
    ```bash
-   perplex-gui
-   # Or: streamlit run perplex_workbench/gui/streamlit_app.py
+   planetary-eos-gui
+   # Or: streamlit run planetary_eos_lab/gui/streamlit_app.py
    ```
 
 4. **Configure Perple_X path**
@@ -69,13 +69,13 @@ Run in an isolated container:
 
 ```bash
 # Build image
-docker build -t perplex-workbench .
+docker build -t planetary-eos-lab .
 
 # Run with GUI
 docker run -p 8501:8501 \
   -v /path/to/perplex:/opt/perplex:ro \
   -v $(pwd)/outputs:/app/outputs \
-  perplex-workbench
+  planetary-eos-lab
 
 # Or use docker-compose
 docker-compose up -d
@@ -113,6 +113,7 @@ Do not edit generated files in `compositions/` or `outputs/` as the source of tr
 **hp633** - Holland & Powell 2011 (v6.33)
 - Modeled oxides: Na2O, MgO, Al2O3, SiO2, K2O, CaO, TiO2, FeO
 - Source-only oxide in the default profile: P2O5
+- Default excluded phases: `q`, `crst`, `trd`
 - Best for: Compositions requiring TiO2 or K2O
 - Database file: `hp633ver.dat`
 - Solution model file: `solution_model.dat`
@@ -130,15 +131,15 @@ Do not edit generated files in `compositions/` or `outputs/` as the source of tr
 **Via environment variable:**
 ```bash
 export PERPLEX_DATABASE=hp633
-perplex-gui
+planetary-eos-gui
 ```
 
 **Via CLI flag:**
 ```bash
-perplex-run --database hp633
+planetary-eos-run --database hp633
 ```
 
-The GUI still lets you record `TiO2`, `K2O`, and `P2O5` because they are common source-composition fields. With the default stx21 profile, all three are source-only. With the default hp633 profile, TiO2 and K2O are passed to BUILD, while P2O5 remains source-only. Use a custom thermodynamic database, solution model file, and BUILD input before interpreting P-bearing effects.
+The GUI still lets you record `TiO2`, `K2O`, and `P2O5` because they are common source-composition fields. With the default stx21 profile, all three are source-only. With the default hp633 profile, TiO2 and K2O are passed to BUILD, while P2O5 remains source-only. The hp633 template also excludes `q`, `crst`, and `trd` so the default PlanetProfile-facing seismic table remains finite. Use a custom thermodynamic database, solution model file, and BUILD input before interpreting P-bearing effects.
 
 ## Command Line Interface
 
@@ -146,24 +147,24 @@ After installation, all functionality is available via command-line tools:
 
 ```bash
 # Launch GUI
-perplex-gui
+planetary-eos-gui
 
 # Run full pipeline
-perplex-pipeline
-perplex-pipeline --project moon_far_highlands_surface_proxy
-perplex-pipeline --export-planetprofile
+planetary-eos-pipeline
+planetary-eos-pipeline --project moon_far_highlands_surface_proxy
+planetary-eos-pipeline --export-planetprofile
 
 # Generate compositions only
-perplex-make-compositions --config configs/models.json
+planetary-eos-compositions --config configs/models.json
 
 # Run Perple_X (BUILD/VERTEX/WERAMI)
-perplex-run --config configs/models.json --project my_project
+planetary-eos-run --config configs/models.json --project my_project
 
 # Export PlanetProfile tables
-perplex-export --config configs/models.json --planetprofile-export-dir outputs/export
+planetary-eos-export --config configs/models.json --planetprofile-export-dir outputs/export
 
 # Generate comparison plots
-perplex-plot --config configs/models.json --output-dir outputs/plots
+planetary-eos-plot --config configs/models.json --output-dir outputs/plots
 ```
 
 Legacy scripts at the repository root (`run_perplex.py`, `make_compositions.py`, etc.) still work for backward compatibility.
@@ -194,11 +195,11 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 If you use this software in your research, please cite:
 
 ```bibtex
-@software{perplex_workbench,
+@software{planetary_eos_lab,
   author = {Vellard, Emma},
-  title = {Perple_X Workbench: GUI workflow for planetary thermodynamics},
+  title = {Planetary EOS Lab: GUI workflow for planetary thermodynamics},
   year = {2024},
-  url = {https://github.com/EmmaVellard/perplex-workbench}
+  url = {https://github.com/EmmaVellard/planetary-eos-lab}
 }
 ```
 
