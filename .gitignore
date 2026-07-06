@@ -18,6 +18,7 @@ compositions/
 planetary-eos-lab/
 
 # Internal documentation (keep local, don't publish)
+local_notes/
 COMPREHENSIVE_REVIEW.md
 REVIEW_SUMMARY.md
 IMPROVEMENTS_SUMMARY.md
@@ -30,7 +31,9 @@ COMMITS_CREATED.md
 IMPROVEMENTS_V1.1.md
 V1.1_RELEASE_SUMMARY.md
 TESTING_GUIDE_V1.1.md
+FINAL_COMMIT_SUMMARY.md
 HANDOFF.md
+MIGRATION_GUIDE.md
 
 # Files
 docs/
