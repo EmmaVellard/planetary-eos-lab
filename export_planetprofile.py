@@ -105,6 +105,7 @@ def table_manifest_record(table: ExportedTable, config: run_perplex.PipelineConf
         "source_native_table": str(table.source),
         "export_destination": str(table.destination),
         "composition_file": str(model.composition_file),
+        "planetprofile_first_axis": model.planetprofile_first_axis,
         "scientific_status": metadata_value(
             model,
             composition,

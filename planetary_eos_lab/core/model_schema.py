@@ -12,6 +12,7 @@ import run_perplex
 
 from planetary_eos_lab.core.database_utils import (
     get_active_oxides,
+    get_database_components,
     get_source_only_oxides,
 )
 
@@ -24,6 +25,21 @@ SOURCE_ONLY_OXIDES = tuple(oxide for oxide in OXIDE_ORDER if oxide not in ACTIVE
 DEFAULT_SCIENTIFIC_STATUS = "surface_proxy_smoke_test"
 DEFAULT_MODEL_SCOPE = "surface_terrane_proxy"
 DEFAULT_PLANETPROFILE_READINESS = "mechanically_exportable_not_scientifically_final"
+COMPONENT_COMPOSITION_KEYS = (
+    "components_wt_percent",
+    "elements_wt_percent",
+    "perplex_components_wt_percent",
+)
+
+
+def component_composition_from_model(model: dict[str, Any]) -> dict[str, float] | None:
+    for key in COMPONENT_COMPOSITION_KEYS:
+        value = model.get(key)
+        if value is not None:
+            if not isinstance(value, dict):
+                raise ValueError("Component composition must be a JSON object.")
+            return {str(component): float(amount) for component, amount in value.items()}
+    return None
 
 
 @dataclass(frozen=True)
@@ -55,6 +71,19 @@ def validate_model_entry(model: dict[str, Any]) -> ModelValidation:
     project = model.get("project")
     if not isinstance(project, str) or not project.strip():
         errors.append("Missing project name.")
+
+    try:
+        component_composition = component_composition_from_model(model)
+    except (TypeError, ValueError):
+        component_composition = None
+        errors.append("Component composition must contain numeric values.")
+    if component_composition is not None:
+        if sum(component_composition.values()) <= 0:
+            errors.append("Component composition total must be positive.")
+        for key in ("scientific_status", "model_scope", "planetprofile_readiness"):
+            if not model.get(key):
+                warnings.append(f"Missing recommended metadata field: {key}.")
+        return ModelValidation(errors=errors, warnings=warnings)
 
     composition = (
         model.get("oxides_wt_percent")
@@ -111,6 +140,8 @@ def omitted_oxides_for_model(
     model: dict[str, Any],
     database: str = "stx21",
 ) -> list[dict[str, float | str]]:
+    if component_composition_from_model(model) is not None:
+        return []
     return omitted_oxides_for_composition(composition_from_model(model), database=database)
 
 
@@ -194,6 +225,18 @@ def scientific_guardrail_text(model: dict[str, Any], database: str = "stx21") ->
     Returns:
         Formatted guardrail text
     """
+    component_composition = component_composition_from_model(model)
+    if component_composition is not None:
+        active_components = ", ".join(component for _, component in get_database_components(database))
+        return (
+            f"Scientific status: {model.get('scientific_status', 'unknown')}\n"
+            f"PlanetProfile readiness: {model.get('planetprofile_readiness', 'unknown')}\n"
+            "Composition basis: Perple_X components\n"
+            f"Input component total: {sum(component_composition.values()):.2f} wt%\n"
+            f"BUILD components in {database}: {active_components}\n"
+            "Use as final scientific EOS: no"
+        )
+
     omitted = omitted_oxides_for_model(model, database=database)
     omitted_names = ", ".join(str(item["oxide"]) for item in omitted) or "none"
     source_only = get_source_only_oxides(database)
@@ -203,5 +246,5 @@ def scientific_guardrail_text(model: dict[str, Any], database: str = "stx21") ->
         f"PlanetProfile readiness: {model.get('planetprofile_readiness', 'unknown')}\n"
         f"Source-only oxides in {database} BUILD: {', '.join(source_only) if source_only else 'none'}\n"
         f"Nonzero omitted oxides: {omitted_names}\n"
-        f"Use as final Moon mantle EOS: {'yes' if use_as_final_moon_mantle_eos(model) else 'no'}"
+        f"Use as final scientific EOS: {'yes' if use_as_final_moon_mantle_eos(model) else 'no'}"
     )

@@ -166,7 +166,7 @@ def show_import_export_panel(config_path: Path, config: dict[str, Any]):
 
                 save_config_json(config_path, config)
                 st.success(f"✅ Added {project_name} to config")
-                st.info("Switch to 'Build Composition' mode to edit metadata, or 'Run Pipeline' to use this model.")
+                st.info("Switch to Composition > Build to edit metadata, or Run Pipeline to use this model.")
                 st.rerun()
 
         except Exception as exc:

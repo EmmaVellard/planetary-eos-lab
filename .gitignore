@@ -37,6 +37,7 @@ MIGRATION_GUIDE.md
 
 # Files
 docs/
+fits/
 
 # Python
 __pycache__/

@@ -1,0 +1,36 @@
+${PROJECT}
+${THERMODYNAMIC_DATABASE_FILE}
+perplex_option.dat
+n
+2
+n
+n
+H2
+C
+Mg
+Si
+S2
+Fe
+O2
+
+n
+1
+1 50000
+273.15 1000
+y
+${PERPLEX_BULK_VALUES}
+n
+y
+n
+h2oL
+SO2
+CO
+
+y
+${SOLUTION_MODEL_FILE}
+O(HP)
+Opx(HP)
+O(JH)
+Cpx(JH)
+
+${BUILD_TITLE}

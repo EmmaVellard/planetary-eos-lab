@@ -91,7 +91,39 @@ def test_model_validation_normalization_and_omitted_oxides() -> None:
     assert validation.ok
     assert math.isclose(normalized["SiO2"], 45.44544545, rel_tol=0, abs_tol=1e-8)
     assert omitted[0]["oxide"] == "TiO2"
-    assert "Use as final Moon mantle EOS: no" in guardrail
+    assert "Use as final scientific EOS: no" in guardrail
+
+
+def test_model_validation_accepts_component_compositions() -> None:
+    model = {
+        "project": "ci_component_test",
+        "description": "Component test",
+        "database": "dew17_hhph",
+        "scientific_status": "test_candidate",
+        "model_scope": "icy_world_component_model",
+        "planetprofile_readiness": "not_assessed_for_planetprofile_science",
+        "components_wt_percent": {
+            "H2": 2.0,
+            "C": 3.0,
+            "Mg": 10.0,
+            "Al": 1.0,
+            "Si": 11.0,
+            "S2": 5.0,
+            "Ca": 1.0,
+            "Fe": 18.0,
+            "O2": 49.0,
+        },
+    }
+
+    validation = model_schema.validate_model_entry(model)
+    omitted = model_schema.omitted_oxides_for_model(model, database="dew17_hhph")
+    guardrail = model_schema.scientific_guardrail_text(model, database="dew17_hhph")
+
+    assert validation.ok
+    assert validation.errors == []
+    assert omitted == []
+    assert "Composition basis: Perple_X components" in guardrail
+    assert "BUILD components in dew17_hhph: H2, C, Mg, Al, Si, S2, Ca, Ti, Mn, Fe, Ni, O2" in guardrail
 
 
 def test_new_model_template_and_plot_rows() -> None:

@@ -43,15 +43,15 @@ PROPERTY_OPTIONS = {
 }
 GRID_ONLY_OPTION = "Assemblage preview"
 PHASE_MODEL_SELECTOR_KEY = "phase_diagram_project"
-BOUNDARY_LINE_COLOR = "rgba(20,24,28,0.95)"
-BOUNDARY_HALO_COLOR = "rgba(255,255,255,0.88)"
+PHASE_PROPERTY_SELECTOR_KEY = "phase_diagram_property"
+PHASE_PROPERTY_PROJECT_KEY = "phase_diagram_property_project"
+DEFAULT_PHASE_PROPERTY = "Density"
 MAJOR_FRAMEWORK_ASSEMBLAGE_OPTION = "Major framework"
 SIMPLIFIED_ASSEMBLAGE_OPTION = "Simplified major minerals"
 DETAILED_ASSEMBLAGE_OPTION = "Full Perple_X detail"
 ASSEMBLAGE_DETAIL_OPTIONS = [
     MAJOR_FRAMEWORK_ASSEMBLAGE_OPTION,
     SIMPLIFIED_ASSEMBLAGE_OPTION,
-    DETAILED_ASSEMBLAGE_OPTION,
 ]
 PHASE_NAME_HINTS = {
     "SiO2": "silica phase group",
@@ -257,7 +257,7 @@ def simplified_phase_tuple(phases: tuple[str, ...]) -> tuple[str, ...]:
 def major_framework_phase_tuple(phases: tuple[str, ...]) -> tuple[str, ...]:
     simplified = simplified_phase_tuple(phases)
     framework = tuple(phase for phase in simplified if phase in MAJOR_FRAMEWORK_PHASES)
-    return framework or simplified
+    return framework
 
 
 def display_phase_tuple(phases: tuple[str, ...], assemblage_detail: str) -> tuple[str, ...]:
@@ -280,6 +280,8 @@ def build_grouped_assemblage_labels(
     for raw_id in sorted(assemblage_grid.assemblage_ids):
         raw_label = assemblage_grid.labels.get(raw_id, ())
         display_label = display_phase_tuple(raw_label, assemblage_detail)
+        if not display_label:
+            continue
         group_id = label_to_group_id.get(display_label)
         if group_id is None:
             group_id = len(label_to_group_id) + 1
@@ -724,30 +726,7 @@ def add_assemblage_preview_traces(
         )
 
     polylines = connected_boundary_polylines(temperatures, pressures_gpa, display_ids)
-    boundary_x, boundary_y, boundary_count = boundary_polyline_coordinates(polylines)
-    if boundary_x:
-        fig.add_trace(
-            go.Scatter(
-                x=boundary_x,
-                y=boundary_y,
-                mode="lines",
-                line=dict(color=BOUNDARY_HALO_COLOR, width=3.2, shape="spline", smoothing=0.35),
-                name="Boundary contrast halo",
-                hoverinfo="skip",
-                showlegend=False,
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=boundary_x,
-                y=boundary_y,
-                mode="lines",
-                line=dict(color=BOUNDARY_LINE_COLOR, width=1.45, shape="spline", smoothing=0.35),
-                name="Assemblage boundaries",
-                hoverinfo="skip",
-                showlegend=False,
-            )
-        )
+    _boundary_x, _boundary_y, boundary_count = boundary_polyline_coordinates(polylines)
 
     label_x, label_y, label_text = largest_component_label_points(
         display_ids,
@@ -1021,10 +1000,18 @@ def show_phase_diagram_panel(models: list[dict[str, Any]], selected_project: str
     # Options
     with st.expander("⚙️ Diagram options"):
         st.caption("**Property to visualize**")
+        property_options = [*PROPERTY_OPTIONS.keys(), GRID_ONLY_OPTION]
+        if (
+            st.session_state.get(PHASE_PROPERTY_PROJECT_KEY) != selected_project
+            or st.session_state.get(PHASE_PROPERTY_SELECTOR_KEY) not in property_options
+        ):
+            st.session_state[PHASE_PROPERTY_SELECTOR_KEY] = DEFAULT_PHASE_PROPERTY
+            st.session_state[PHASE_PROPERTY_PROJECT_KEY] = selected_project
         prop_choice = st.radio(
             "Property",
-            [*PROPERTY_OPTIONS.keys(), GRID_ONLY_OPTION],
-            index=len(PROPERTY_OPTIONS),
+            property_options,
+            index=property_options.index(DEFAULT_PHASE_PROPERTY),
+            key=PHASE_PROPERTY_SELECTOR_KEY,
             horizontal=True,
             label_visibility="collapsed",
         )
@@ -1033,8 +1020,8 @@ def show_phase_diagram_panel(models: list[dict[str, Any]], selected_project: str
             ASSEMBLAGE_DETAIL_OPTIONS,
             horizontal=True,
             help=(
-                "Major framework gives the cleanest interpretation; simplified keeps silica/melt groups; "
-                "full detail shows every Perple_X assemblage ID."
+                "Major framework gives the cleanest interpretation. Simplified keeps broad silica and melt groups "
+                "but still suppresses minor one-off phase changes."
             ),
         )
 

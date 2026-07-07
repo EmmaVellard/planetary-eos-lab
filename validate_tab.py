@@ -16,6 +16,8 @@ DEFAULT_LOG_NAMES = ("build.log", "vertex.log", "werami.log")
 
 BAD_TEXT_PATTERNS = (
     "Reading solution models from file: not requested",
+)
+WARNING_TEXT_PATTERNS = (
     "warning ver177",
     "cannot be computed because of missing/invalid properties",
 )
@@ -169,12 +171,21 @@ def scan_text_for_issues(text: str) -> list[str]:
     lowered = text.lower()
     for pattern in BAD_TEXT_PATTERNS:
         if pattern.lower() in lowered:
-            issues.append(f"Detected log/table warning: {pattern}")
+            issues.append(f"Detected log/table issue: {pattern}")
 
     for match in sorted(set(BAD_NUMBER_RE.findall(text))):
         issues.append(f"Detected Perple_X bad-number sentinel: {match}")
 
     return issues
+
+
+def scan_text_for_warnings(text: str) -> list[str]:
+    warnings: list[str] = []
+    lowered = text.lower()
+    for pattern in WARNING_TEXT_PATTERNS:
+        if pattern.lower() in lowered:
+            warnings.append(f"Detected Perple_X warning: {pattern}")
+    return warnings
 
 
 def scan_table_for_issues(tab_path: Path, tab: TabData) -> list[str]:
@@ -280,8 +291,10 @@ def validate_project_output(
         else:
             issues.extend(scan_table_for_issues(tab, tab_data))
 
+    warnings.extend(scan_text_for_warnings(logs_text))
     issues.extend(scan_text_for_issues(combined_text))
     issues = sorted(set(issues))
+    warnings = sorted(set(warnings))
     result = ValidationResult(
         project=project,
         output_dir=output_dir,

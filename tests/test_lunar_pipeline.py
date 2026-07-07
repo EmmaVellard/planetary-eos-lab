@@ -85,11 +85,63 @@ def make_fake_perplex(
         "K2O 94.1960\n"
         "CaO 56.0770\n"
         "TiO2 79.8660\n"
+        "Cr2O3 151.9900\n"
+        "MnO 70.9370\n"
         "FeO 71.8440\n"
+        "NiO 74.6930\n"
         "end_components\n"
     )
     (datafiles_dir / "solution_model.dat").write_text(
         "O(HP)\nOpx(HP)\nCpx(HP)\nGt(HP)\nSp(HP)\nPl(I1,HP)\nIlm(WPH)\n"
+        "Gt(H)\nFper(H)\nMpv(H)\nCpv(H)\nCFer(H)\nAki(H)\nO(JH)\nWad(H)\nRing(H)\n"
+        "Cpx(JH)\nOpx(JH)\nHpx(H)\nNAl(H)\nCor(H)\nAtg(PN)\nAmph(DHP)\nChum\n"
+        "St(HP)\nmelt(HP)\nCpx(HGP)\nFsp(C1)\nO(HGP)\nOpx(HGP)\nSp(HGP)\n"
+        "Gt(HGP)\nCrd(HGP)\nBi(HGP)\nMica(W)\nEp(HP11)\ncAmph(G)\nChl(W)\n"
+    )
+    (datafiles_dir / "dew17hp622ver_elements.dat").write_text(
+        "begin_components\n"
+        "Na 22.9898\n"
+        "Mg 24.3045\n"
+        "Al 26.9812\n"
+        "Si 28.0850\n"
+        "Ca 40.0775\n"
+        "Ti 47.8670\n"
+        "Mn 54.9380\n"
+        "Fe 55.8445\n"
+        "Ni 58.6934\n"
+        "O2 31.9990\n"
+        "H2 2.0155\n"
+        "C 12.0110\n"
+        "S2 64.1300\n"
+        "N2 28.0130\n"
+        "end_components\n"
+    )
+    (datafiles_dir / "dew13hp622ver_elements.dat").write_text(
+        "begin_components\n"
+        "Mg 24.3045\n"
+        "Si 28.0850\n"
+        "Fe 55.8445\n"
+        "O2 31.9990\n"
+        "H2 2.0155\n"
+        "C 12.0110\n"
+        "S2 64.1300\n"
+        "end_components\n"
+    )
+    (datafiles_dir / "hpha02ver.dat").write_text(
+        "begin_components\n"
+        "NA2O 61.9790\n"
+        "MGO 40.3040\n"
+        "AL2O3 101.9610\n"
+        "SIO2 60.0840\n"
+        "K2O 94.1960\n"
+        "CAO 56.0770\n"
+        "TIO2 79.8660\n"
+        "CR2O3 151.9900\n"
+        "MNO 70.9370\n"
+        "FEO 71.8440\n"
+        "NIO 74.6930\n"
+        "H2O 18.0150\n"
+        "end_components\n"
     )
 
     if omit != "build":
@@ -131,8 +183,11 @@ import sys
 
 lines = sys.stdin.read().splitlines()
 project = lines[0] if lines else "unknown"
-expected = ["2", "38", "1", "2", "13", "14", "3", "4", "10", "11", "0", "n", "1", "0"]
-if lines[1:] != expected:
+expected_sequences = [
+    ["2", "38", "1", "2", "13", "14", "3", "4", "10", "11", "0", "n", "1", "0"],
+    ["2", "38", "1", "n", "2", "13", "14", "3", "4", "10", "11", "0", "n", "1", "0"],
+]
+if lines[1:] not in expected_sequences:
     print(f"unexpected WERAMI input: {{lines[1:]!r}}", file=sys.stderr)
     raise SystemExit(2)
 Path(f"{{project}}_1.tab").write_text({tab_text!r})
@@ -256,6 +311,56 @@ def make_inline_config(tmp_path: Path, perplex_dir: Path) -> tuple[Path, Path]:
     return config_path, output_dir
 
 
+def make_component_config(
+    tmp_path: Path,
+    perplex_dir: Path,
+    *,
+    project: str = "ci_component_test",
+    database: str = "dew17_hhph",
+    components: dict[str, float] | None = None,
+    planetprofile_first_axis: str = "T",
+) -> tuple[Path, Path]:
+    output_dir = tmp_path / "outputs" / project
+    if components is None:
+        components = {
+            "H2": 2.07,
+            "C": 3.53,
+            "Mg": 9.94,
+            "Al": 0.89,
+            "Si": 10.90,
+            "S2": 5.54,
+            "Ca": 0.95,
+            "Ti": 0.00,
+            "Mn": 0.00,
+            "Fe": 18.65,
+            "Ni": 0.00,
+            "O2": 47.54,
+        }
+    config = {
+        "perplex_dir": str(perplex_dir),
+        "database": database,
+        "models": [
+            {
+                "project": project,
+                "description": f"{project} component test model",
+                "database": database,
+                "output_dir": str(output_dir),
+                "planetprofile_filename": f"{project}.tab",
+                "planetprofile_first_axis": planetprofile_first_axis,
+                "scientific_status": "test_candidate",
+                "model_scope": "icy_world_component_model",
+                "planetprofile_readiness": "not_assessed_for_planetprofile_science",
+                "composition_interpretation": "Component model used by the test suite.",
+                "component_label": "Perple_X component",
+                "components_wt_percent": components,
+            }
+        ],
+    }
+    config_path = tmp_path / f"{project}_models.json"
+    config_path.write_text(json.dumps(config) + "\n")
+    return config_path, output_dir
+
+
 def test_lunar_models_use_literature_proxy_values() -> None:
     models = {model.project: model for model in make_compositions.lunar_models()}
 
@@ -285,7 +390,8 @@ def test_generated_composition_records_scientific_and_omission_metadata(tmp_path
     assert data["model_scope"] == "surface_terrane_proxy"
     assert data["planetprofile_readiness"] == "mechanically_exportable_not_scientifically_final"
     assert "not a final Ti-bearing mantle EOS" in data["composition_interpretation"]
-    assert data["default_perplex_build"]["source_only_oxides"] == ["TiO2", "K2O", "P2O5"]
+    # Extended oxide list - stx21 only supports 6 oxides, rest are source-only
+    assert data["default_perplex_build"]["source_only_oxides"] == ["TiO2", "Cr2O3", "MnO", "NiO", "K2O", "P2O5", "H2O"]
     assert data["default_perplex_build"]["bulk_values_order"] == ["NA2O", "MGO", "AL2O3", "SIO2", "CAO", "FEO"]
     omitted = data["omitted_oxides_from_default_build"]
     assert omitted[0]["oxide"] == "TiO2"
@@ -343,6 +449,11 @@ def test_default_werami_input_sequence_is_backwards_compatible(tmp_path: Path) -
     assert run_perplex.werami_input_text(model) == (
         f"{PROJECT}\n2\n38\n1\n2\n13\n14\n3\n4\n10\n11\n0\nn\n1\n0\n"
     )
+
+
+def test_icy_databases_use_fluid_prompt_werami_sequence() -> None:
+    for database in ("dew17_hhph", "hpha02_hydrous", "dew13_hydrous", "dew17_comet"):
+        assert run_perplex.default_werami_sequence_for_database(database) == run_perplex.HP633_WERAMI_INPUT_SEQUENCE
 
 
 def test_hp633_default_werami_sequence_answers_fluid_prompt_and_requests_density(tmp_path: Path) -> None:
@@ -410,12 +521,149 @@ def test_hp633_composition_metadata_and_bulk_order(tmp_path: Path) -> None:
     assert build["database_name"] == "hp633"
     assert build["thermodynamic_database"] == "hp633ver.dat"
     assert build["solution_model_file"] == "solution_model.dat"
+    # hp633 now includes all rock-forming oxides (only P2O5 is source-only)
     assert build["source_only_oxides"] == ["P2O5"]
-    assert build["bulk_values_order"] == ["Na2O", "MgO", "Al2O3", "SiO2", "K2O", "CaO", "TiO2", "FeO"]
+    # Order matches OXIDE_ORDER: SiO2, TiO2, Al2O3, Cr2O3, FeO, MnO, NiO, MgO, CaO, Na2O, K2O, H2O
+    assert build["bulk_values_order"] == ["SiO2", "TiO2", "Al2O3", "Cr2O3", "FeO", "MnO", "NiO", "MgO", "CaO", "Na2O", "K2O", "H2O"]
     assert data["omitted_oxides_from_build"] == []
 
     bulk_values = (tmp_path / f"{NEAR_PROJECT}_bulk_values.txt").read_text().strip()
-    assert bulk_values == "0.60060060 9.20920921 14.91491491 45.44544545 0.00000000 11.81181181 3.90390390 14.11411411"
+    # Order: SiO2 TiO2 Al2O3 Cr2O3 FeO MnO NiO MgO CaO Na2O K2O H2O (trace elements=0)
+    assert bulk_values == "45.44544545 3.90390390 14.91491491 0.00000000 14.11411411 0.00000000 0.00000000 9.20920921 11.81181181 0.60060060 0.00000000 0.00000000"
+
+
+def test_component_composition_generation_writes_perplex_components(tmp_path: Path) -> None:
+    perplex_dir = make_fake_perplex(tmp_path)
+    config_path, _ = make_component_config(tmp_path, perplex_dir)
+
+    result = make_compositions.main(["--config", str(config_path)])
+
+    assert result is None
+    composition_path = tmp_path / "compositions" / "ci_component_test.json"
+    values_path = tmp_path / "compositions" / "ci_component_test_bulk_values.txt"
+    data = json.loads(composition_path.read_text())
+    assert data["composition_basis"] == "perplex_components"
+    assert data["component_order"] == ["H2", "C", "Mg", "Al", "Si", "S2", "Ca", "Ti", "Mn", "Fe", "Ni", "O2"]
+    assert data["perplex_build"]["thermodynamic_database"] == "dew17hp622ver_elements.dat"
+    assert data["perplex_build"]["bulk_values_order"] == ["H2", "C", "Mg", "Al", "Si", "S2", "Ca", "Ti", "Mn", "Fe", "Ni", "O2"]
+    bulk_values = [float(value) for value in values_path.read_text().split()]
+    assert len(bulk_values) == 12  # H2, C, Mg, Al, Si, S2, Ca, Ti, Mn, Fe, Ni, O2
+    assert math.isclose(sum(bulk_values), 100.0, rel_tol=0, abs_tol=1e-6)
+    assert math.isclose(bulk_values[0], data["composition_normalized"]["H2"], rel_tol=0, abs_tol=1e-8)
+
+
+def test_component_pipeline_runs_build_with_default_icy_template(tmp_path: Path) -> None:
+    perplex_dir = make_fake_perplex(tmp_path)
+    config_path, output_dir = make_component_config(tmp_path, perplex_dir)
+
+    result = run_full_pipeline(config_path, skip_compositions=False)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert "Running BUILD for ci_component_test" in result.stdout
+    assert "BUILD skipped" not in result.stdout + result.stderr
+    build_log = (output_dir / "build.log").read_text()
+    assert "dew17hp622ver_elements.dat" in build_log
+    assert "H2\nC\nMg\nAl\nSi\nS2\nCa\nTi\nMn\nFe\nNi\nO2" in build_log
+    assert "${PERPLEX_BULK_VALUES}" not in build_log
+    assert (output_dir / "work" / "ci_component_test.dat").exists()
+    assert (output_dir / "ci_component_test_planetprofile_native.tab").exists()
+
+
+def test_hpha02_component_pipeline_can_write_pressure_first_native_table(tmp_path: Path) -> None:
+    perplex_dir = make_fake_perplex(tmp_path)
+    config_path, output_dir = make_component_config(
+        tmp_path,
+        perplex_dir,
+        project="hydrous_component_test",
+        database="hpha02_hydrous",
+        planetprofile_first_axis="P",
+        components={
+            "SIO2": 34.00,
+            "TIO2": 0.00,
+            "AL2O3": 3.22,
+            "FEO": 26.83,
+            "MGO": 24.58,
+            "CAO": 2.62,
+            "NA2O": 0.49,
+            "K2O": 0.00,
+            "H2O": 0.92,
+        },
+    )
+
+    result = run_full_pipeline(config_path, skip_compositions=False)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    lines = (output_dir / "hydrous_component_test_planetprofile_native.tab").read_text().splitlines()
+    assert lines[3].strip() == "P(bar)"
+    assert lines[7].strip() == "T(K)"
+
+
+def test_hpha02_default_template_uses_simple_component_list() -> None:
+    template = run_perplex.default_build_template_for_database("hpha02_hydrous")
+    text = template.read_text()
+    (p_min, p_max), (t_min, t_max) = run_perplex.extract_pt_range_from_template(template)
+
+    assert template.name == "icy_hpha02_hydrous_simple_template.build.in"
+    assert "\nSIO2\nAL2O3\nFEO\nMGO\nCAO\nNA2O\nH2O\n" in text
+    assert "\nTIO2\n" not in text
+    assert "\nCR2O3\n" not in text
+    assert (p_min, p_max) == (1.0, 7000.0)
+    assert (t_min, t_max) == (250.0, 320.0)
+
+
+def test_model_level_build_template_file_is_honored(tmp_path: Path) -> None:
+    perplex_dir = make_fake_perplex(tmp_path)
+    template = tmp_path / "custom_hpha02.build.in"
+    template.write_text("${PROJECT}\n${PERPLEX_BULK_VALUES}\n")
+    config = {
+        "perplex_dir": str(perplex_dir),
+        "models": [
+            {
+                "project": "custom_template_test",
+                "database": "hpha02_hydrous",
+                "composition_file": str(tmp_path / "composition.json"),
+                "build_template_file": str(template),
+                "output_dir": str(tmp_path / "outputs" / "custom_template_test"),
+            }
+        ],
+    }
+    config_path = tmp_path / "models.json"
+    config_path.write_text(json.dumps(config) + "\n")
+
+    loaded = run_perplex.load_config(config_path)
+
+    assert loaded.models[0].build_input_file == template
+
+
+def test_hpha02_component_generation_uses_uppercase_component_aliases(tmp_path: Path) -> None:
+    perplex_dir = make_fake_perplex(tmp_path)
+    config_path, _ = make_component_config(
+        tmp_path,
+        perplex_dir,
+        project="hpha02_uppercase_components",
+        database="hpha02_hydrous",
+        components={
+            "SIO2": 34.00,
+            "AL2O3": 3.22,
+            "FEO": 26.83,
+            "MGO": 24.58,
+            "CAO": 2.62,
+            "NA2O": 0.49,
+            "H2O": 0.92,
+        },
+    )
+
+    make_compositions.main(["--config", str(config_path)])
+
+    composition_path = tmp_path / "compositions" / "hpha02_uppercase_components.json"
+    values_path = tmp_path / "compositions" / "hpha02_uppercase_components_bulk_values.txt"
+    data = json.loads(composition_path.read_text())
+    bulk_values = [float(value) for value in values_path.read_text().split()]
+
+    assert data["component_order"][:7] == ["SIO2", "AL2O3", "FEO", "MGO", "CAO", "NA2O", "H2O"]
+    assert data["perplex_build"]["bulk_values_order"] == ["SIO2", "AL2O3", "FEO", "MGO", "CAO", "NA2O", "H2O"]
+    assert math.isclose(bulk_values[0], data["composition_normalized"]["SIO2"], rel_tol=0, abs_tol=1e-8)
+    assert math.isclose(bulk_values[1], data["composition_normalized"]["AL2O3"], rel_tol=0, abs_tol=1e-8)
 
 
 def test_hp633_config_uses_matching_default_template(tmp_path: Path) -> None:
@@ -452,12 +700,16 @@ def test_render_hp633_build_input_uses_hp_bulk_values(tmp_path: Path) -> None:
                     "SiO2": 45.0,
                     "TiO2": 4.0,
                     "Al2O3": 15.0,
+                    "Cr2O3": 0.0,
                     "FeO": 14.0,
+                    "MnO": 0.0,
+                    "NiO": 0.0,
                     "MgO": 9.0,
                     "CaO": 12.0,
                     "Na2O": 0.5,
                     "K2O": 0.5,
                     "P2O5": 0.0,
+                    "H2O": 0.0,
                 }
             }
         )
@@ -476,7 +728,8 @@ def test_render_hp633_build_input_uses_hp_bulk_values(tmp_path: Path) -> None:
 
     rendered = run_perplex.render_build_input(tmp_path / "fake_perplex", model)
 
-    assert rendered.strip() == "0.50000000 9.00000000 15.00000000 45.00000000 0.50000000 12.00000000 4.00000000 14.00000000"
+    # hp633 now uses OXIDE_ORDER: SiO2, TiO2, Al2O3, Cr2O3, FeO, MnO, NiO, MgO, CaO, Na2O, K2O, H2O
+    assert rendered.strip() == "45.00000000 4.00000000 15.00000000 0.00000000 14.00000000 0.00000000 0.00000000 9.00000000 12.00000000 0.50000000 0.50000000 0.00000000"
 
 
 def test_default_build_templates_answer_chemical_potential_prompt_before_components() -> None:
@@ -484,7 +737,8 @@ def test_default_build_templates_answer_chemical_potential_prompt_before_compone
     hp_template = (PIPELINE_DIR / "build_inputs" / "lunar_hp633_template.build.in").read_text()
 
     assert "\nn\nn\nn\nNA2O\nMGO\nAL2O3\n" in stx_template
-    assert "\nn\nn\nn\nNa2O\nMgO\nAl2O3\n" in hp_template
+    # hp633 now uses OXIDE_ORDER: SiO2, TiO2, Al2O3, FeO, MgO, CaO, Na2O, K2O, H2O
+    assert "\nn\nn\nn\nSiO2\nTiO2\nAl2O3\n" in hp_template
 
 
 def test_hp633_default_template_excludes_silica_phases_with_incomplete_seismic_properties() -> None:
@@ -554,7 +808,7 @@ def test_phase_diagram_simplified_assemblages_group_minor_phase_changes() -> Non
     assert group_labels[simplified_ids[1][1]] == ("ru",)
     assert phase_diagram.simplified_phase_tuple(("Cpx(HP)", "qL", "anL")) == ("Cpx(HP)", "Melt(L)")
     assert phase_diagram.major_framework_phase_tuple(("Cpx(HP)", "Gt(HP)", "coe", "ru")) == ("Cpx(HP)", "Gt(HP)")
-    assert phase_diagram.major_framework_phase_tuple(("qL", "anL")) == ("Melt(L)",)
+    assert phase_diagram.major_framework_phase_tuple(("qL", "anL")) == ()
 
     framework_labels, framework_raw_to_group_id = phase_diagram.build_grouped_assemblage_labels(
         assemblage_grid,
@@ -883,23 +1137,19 @@ def test_full_pipeline_exports_planetprofile_tables(tmp_path: Path) -> None:
     assert manifest["tables"][0]["export_warning"].startswith("This table is mechanically exportable")
 
 
-def test_missing_dat_file_fails_before_vertex(tmp_path: Path) -> None:
+def test_missing_build_input_fails_before_vertex(tmp_path: Path) -> None:
     perplex_dir = make_fake_perplex(tmp_path)
     config_path, _ = make_config(tmp_path, perplex_dir, build_input=False)
 
     result = run_pipeline(config_path)
 
     assert result.returncode != 0
-    assert "Missing Perple_X .dat file" in result.stderr
+    assert "Missing BUILD input file" in result.stderr
 
 
 def test_missing_executable_fails_clearly(tmp_path: Path) -> None:
     perplex_dir = make_fake_perplex(tmp_path, omit="vertex")
-    config_path, _ = make_config(tmp_path, perplex_dir, build_input=False)
-    output_dir = tmp_path / "outputs" / PROJECT
-    work_dir = output_dir / "work"
-    work_dir.mkdir(parents=True)
-    (work_dir / f"{PROJECT}.dat").write_text("fake dat\n")
+    config_path, _ = make_config(tmp_path, perplex_dir, build_input=True)
 
     result = run_pipeline(config_path)
 
@@ -932,14 +1182,17 @@ def test_solution_model_not_requested_log_fails_validation(tmp_path: Path) -> No
     assert "Reading solution models from file: not requested" in report
 
 
-def test_warning_ver177_log_fails_validation(tmp_path: Path) -> None:
+def test_warning_ver177_log_is_reported_without_failing_finite_tables(tmp_path: Path) -> None:
     perplex_dir = make_fake_perplex(tmp_path, werami_log="warning ver177")
     config_path, output_dir = make_config(tmp_path, perplex_dir)
 
     result = run_pipeline(config_path)
 
-    assert result.returncode != 0
-    assert "warning ver177" in (output_dir / "validation_report.txt").read_text()
+    assert result.returncode == 0
+    report = (output_dir / "validation_report.txt").read_text()
+    assert "STATUS: PASS" in report
+    assert "Warnings:" in report
+    assert "warning ver177" in report
 
 
 def test_bad_number_sentinel_in_tab_fails_validation(tmp_path: Path) -> None:
@@ -974,3 +1227,139 @@ def test_zero_only_alpha_column_fails_validation(tmp_path: Path) -> None:
 
     assert result.returncode != 0
     assert "Zero-only alpha column" in (output_dir / "validation_report.txt").read_text()
+
+
+def test_component_composition_missing_required_component_shows_helpful_error(tmp_path: Path) -> None:
+    """Test that missing required components produce helpful error with database suggestions."""
+    # Create a component composition missing O2 (required by dew17_hhph)
+    incomplete_model = make_compositions.ComponentComposition(
+        project="incomplete_ci",
+        description="CI missing O2 for testing error message",
+        raw_wt_percent={
+            "H2": 2.0,
+            "C": 3.5,
+            "Mg": 10.0,
+            "Al": 1.0,
+            "Si": 11.0,
+            "S2": 5.5,
+            "Ca": 1.0,
+            "Fe": 19.0,
+            # Missing O2!
+        },
+        component_order=["H2", "C", "Mg", "Al", "Si", "S2", "Ca", "Fe"],
+        database="dew17_hhph",
+    )
+
+    try:
+        make_compositions.write_component_composition(incomplete_model, tmp_path / "compositions")
+        assert False, "Should have raised ValueError for missing O2"
+    except ValueError as e:
+        error_msg = str(e)
+        # Check that error message is helpful
+        assert "missing BUILD component(s): Ti, Mn, Ni, O2" in error_msg
+        assert "Your database 'dew17_hhph' requires" in error_msg
+        assert "Your composition provides:" in error_msg
+        assert "Available databases:" in error_msg
+        assert "docs/icy_worlds_guide.md" in error_msg
+
+
+def test_database_template_mismatch_shows_helpful_error(tmp_path: Path) -> None:
+    """Test that database-template mismatches produce helpful error."""
+    perplex_dir = make_fake_perplex(tmp_path)
+
+    # Create model with dew17_hhph database but lunar_stx21 template
+    model = run_perplex.ModelConfig(
+        project="mismatch_test",
+        composition_file=tmp_path / "compositions" / "test.json",
+        build_input_file=PIPELINE_DIR / "build_inputs" / "lunar_stx21_template.build.in",
+        output_dir=tmp_path / "output",
+        work_dir=tmp_path / "work",
+        database="dew17_hhph",  # Wrong database for stx21 template!
+    )
+
+    try:
+        run_perplex.validate_thermodynamic_setup(perplex_dir, model)
+        assert False, "Should have raised PipelineError for template mismatch"
+    except run_perplex.PipelineError as e:
+        error_msg = str(e)
+        # Check helpful error message
+        assert "BUILD template mismatch" in error_msg
+        assert "lunar_stx21_template.build.in" in error_msg
+        assert "designed for 'stx21'" in error_msg
+        assert "Model database: dew17_hhph" in error_msg
+        assert "Solutions:" in error_msg
+        assert "docs/icy_worlds_guide.md" in error_msg
+
+
+def test_component_composition_plot_labels_correctly(tmp_path: Path) -> None:
+    """Test that component compositions are labeled correctly in plots."""
+    # Create two component compositions
+    perplex_dir = make_fake_perplex(tmp_path)
+
+    ci_model = make_compositions.ComponentComposition(
+        project="ci_test",
+        description="CI test",
+        raw_wt_percent={"H2": 2.0, "C": 3.5, "Mg": 10.0, "Al": 1.0, "Si": 11.0, "S2": 5.5, "Ca": 1.0, "Ti": 0.0, "Mn": 0.0, "Fe": 19.0, "Ni": 0.0, "O2": 47.0},
+        component_order=["H2", "C", "Mg", "Al", "Si", "S2", "Ca", "Ti", "Mn", "Fe", "Ni", "O2"],
+        database="dew17_hhph",
+    )
+
+    cm_model = make_compositions.ComponentComposition(
+        project="cm_test",
+        description="CM test",
+        raw_wt_percent={"H2": 1.4, "C": 2.3, "Mg": 11.8, "Al": 1.2, "Si": 13.0, "S2": 2.8, "Ca": 1.3, "Ti": 0.0, "Mn": 0.0, "Fe": 22.0, "Ni": 0.0, "O2": 44.0},
+        component_order=["H2", "C", "Mg", "Al", "Si", "S2", "Ca", "Ti", "Mn", "Fe", "Ni", "O2"],
+        database="dew17_hhph",
+    )
+
+    comp_dir = tmp_path / "compositions"
+    make_compositions.write_component_composition(ci_model, comp_dir)
+    make_compositions.write_component_composition(cm_model, comp_dir)
+
+    models = [
+        plot_comparisons.PlotModel(
+            project="ci_test",
+            label="CI test",
+            composition_file=comp_dir / "ci_test.json",
+            tab_file=tmp_path / "outputs" / "ci_test" / "ci_test_planetprofile.tab",
+        ),
+        plot_comparisons.PlotModel(
+            project="cm_test",
+            label="CM test",
+            composition_file=comp_dir / "cm_test.json",
+            tab_file=tmp_path / "outputs" / "cm_test" / "cm_test_planetprofile.tab",
+        ),
+    ]
+
+    svg = plot_comparisons.composition_plot_svg(models)
+
+    # Check that plot is labeled as "component" not "oxide"
+    assert "Normalized component composition" in svg
+    assert "nonzero components" in svg
+    # Check that component names appear
+    assert "H2" in svg or "Mg" in svg or "Fe" in svg
+
+
+def test_pt_range_extraction_from_template() -> None:
+    """Test that PT ranges can be extracted from BUILD templates."""
+    # Test with real icy world template
+    template_path = PIPELINE_DIR / "build_inputs" / "icy_dew17_hhph_template.build.in"
+    if template_path.exists():
+        pt_range = run_perplex.extract_pt_range_from_template(template_path)
+        assert pt_range is not None, "Should extract PT range from icy template"
+        (p_min, p_max), (t_min, t_max) = pt_range
+        # dew17_hhph uses 1-140000 bar, 250-2000 K (reduced to avoid NaN at high T)
+        assert p_min == 1.0
+        assert p_max == 140000.0
+        assert t_min == 250.0
+        assert t_max == 2000.0
+
+    # Test with lunar template
+    lunar_template = PIPELINE_DIR / "build_inputs" / "lunar_stx21_template.build.in"
+    if lunar_template.exists():
+        pt_range = run_perplex.extract_pt_range_from_template(lunar_template)
+        assert pt_range is not None
+        (p_min, p_max), (t_min, t_max) = pt_range
+        # stx21 uses 1000-50000 bar, 800-2200 K
+        assert 800 <= t_min <= 1000
+        assert 2000 <= t_max <= 2500

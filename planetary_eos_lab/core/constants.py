@@ -4,16 +4,21 @@ from __future__ import annotations
 from typing import Final
 
 # Oxide ordering - must match BUILD input order
+# Extended to include all common rock-forming oxides supported by thermodynamic databases
 OXIDE_ORDER: Final[tuple[str, ...]] = (
     "SiO2",
     "TiO2",
     "Al2O3",
+    "Cr2O3",
     "FeO",
+    "MnO",
+    "NiO",
     "MgO",
     "CaO",
     "Na2O",
     "K2O",
     "P2O5",
+    "H2O",
 )
 
 # Perple_X component mapping (oxide name -> Perple_X component name)

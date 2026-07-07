@@ -33,19 +33,80 @@ def get_database_components(database_name: str) -> tuple[tuple[str, str], ...]:
         )
 
     elif database_name == "hp633":
-        # Match the component names declared by hp633ver.dat. It does not declare P2O5.
+        # Match the component names declared by hp633ver.dat
+        # Includes all common rock-forming oxides
+        # Does not include P2O5 (not declared by hp633ver.dat)
         return (
-            ("Na2O", "Na2O"),
-            ("MgO", "MgO"),
-            ("Al2O3", "Al2O3"),
             ("SiO2", "SiO2"),
-            ("K2O", "K2O"),
-            ("CaO", "CaO"),
             ("TiO2", "TiO2"),
+            ("Al2O3", "Al2O3"),
+            ("Cr2O3", "Cr2O3"),
             ("FeO", "FeO"),
+            ("MnO", "MnO"),
+            ("NiO", "NiO"),
+            ("MgO", "MgO"),
+            ("CaO", "CaO"),
+            ("Na2O", "Na2O"),
+            ("K2O", "K2O"),
+            ("H2O", "H2O"),
         )
 
-    # Default: return stx21 components
+    elif database_name == "dew17_hhph":
+        # DEW17 element-based database - includes transition metals
+        return (
+            ("H2", "H2"),
+            ("C", "C"),
+            ("Mg", "Mg"),
+            ("Al", "Al"),
+            ("Si", "Si"),
+            ("S2", "S2"),
+            ("Ca", "Ca"),
+            ("Ti", "Ti"),
+            ("Mn", "Mn"),
+            ("Fe", "Fe"),
+            ("Ni", "Ni"),
+            ("O2", "O2"),
+        )
+
+    elif database_name == "hpha02_hydrous":
+        # Uses HP02 oxide system with basic rock-forming oxides + H2O
+        # First element is standard oxide name, second is Perple_X component name (uppercase for HP databases)
+        # Basic version includes: SiO2, Al2O3, FeO, MgO, CaO, Na2O, H2O
+        # Does not include: P2O5, Cr2O3, MnO, NiO, TiO2, K2O (not in basic hpha02ver.dat)
+        return (
+            ("SiO2", "SIO2"),
+            ("Al2O3", "AL2O3"),
+            ("FeO", "FEO"),
+            ("MgO", "MGO"),
+            ("CaO", "CAO"),
+            ("Na2O", "NA2O"),
+            ("H2O", "H2O"),
+        )
+
+    elif database_name == "dew13_hydrous":
+        return (
+            ("H2", "H2"),
+            ("C", "C"),
+            ("Mg", "Mg"),
+            ("Si", "Si"),
+            ("S2", "S2"),
+            ("Fe", "Fe"),
+            ("O2", "O2"),
+        )
+
+    elif database_name == "dew17_comet":
+        return (
+            ("H2", "H2"),
+            ("O2", "O2"),
+            ("C", "C"),
+            ("Fe", "Fe"),
+            ("Si", "Si"),
+            ("Mg", "Mg"),
+            ("N2", "N2"),
+            ("S2", "S2"),
+        )
+
+    # Should not be reached because DATABASES validation happens above.
     return get_database_components("stx21")
 
 
@@ -72,6 +133,8 @@ def get_source_only_oxides(database_name: str) -> tuple[str, ...]:
         Tuple of oxide names
     """
     active = get_active_oxides(database_name)
+    if not active.intersection(OXIDE_ORDER):
+        return ()
     return tuple(oxide for oxide in OXIDE_ORDER if oxide not in active)
 
 
@@ -119,7 +182,7 @@ def describe_database(database_name: str) -> str:
         f"File: {db.database_file}",
         f"Description: {db.description}",
         "",
-        f"Modeled oxides: {', '.join(sorted(active))}",
+        f"Modeled components/oxides: {', '.join(sorted(active))}",
     ]
 
     if source_only:

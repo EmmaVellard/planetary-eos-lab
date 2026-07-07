@@ -14,16 +14,21 @@ DEFAULT_CONFIG = BASE_DIR / "configs" / "models.json"
 OUTDIR = BASE_DIR / "compositions"
 
 # Keep this order fixed. Use the same order when answering BUILD prompts.
+# Extended to include all common rock-forming oxides supported by thermodynamic databases
 OXIDE_ORDER = [
     "SiO2",
     "TiO2",
     "Al2O3",
+    "Cr2O3",
     "FeO",
+    "MnO",
+    "NiO",
     "MgO",
     "CaO",
     "Na2O",
     "K2O",
     "P2O5",
+    "H2O",
 ]
 
 MODEL_STATUS = (
@@ -43,6 +48,12 @@ ACTIVE_BUILD_OXIDES = {oxide for oxide, _ in PERPLEX_BUILD_COMPONENTS}
 SOURCE_ONLY_OXIDES = tuple(oxide for oxide in OXIDE_ORDER if oxide not in ACTIVE_BUILD_OXIDES)
 OMITTED_OXIDE_THRESHOLD = 1.0e-12
 DEFAULT_DATABASE = "stx21"
+COMPONENT_COMPOSITION_BASIS = "perplex_components"
+COMPONENT_COMPOSITION_KEYS = (
+    "components_wt_percent",
+    "elements_wt_percent",
+    "perplex_components_wt_percent",
+)
 
 
 @dataclass(frozen=True)
@@ -62,6 +73,28 @@ class LunarComposition:
     database: str = DEFAULT_DATABASE
 
 
+@dataclass(frozen=True)
+class ComponentComposition:
+    project: str
+    description: str
+    raw_wt_percent: dict[str, float]
+    component_order: list[str]
+    component_label: str = "component"
+    source_note: str = "Component composition entered in the model config."
+    scientific_status: str = "user_defined"
+    model_scope: str = "icy_world_component_model"
+    planetprofile_readiness: str = "not_assessed_for_planetprofile_science"
+    composition_interpretation: str = (
+        "User-defined Perple_X component composition. Review thermodynamic data, solution models, "
+        "phase exclusions, and P-T grid before scientific use."
+    )
+    literature_proxy: bool = False
+    database: str = DEFAULT_DATABASE
+
+
+CompositionConfig = LunarComposition | ComponentComposition
+
+
 def ordered_composition(composition: dict[str, float]) -> dict[str, float]:
     unknown = sorted(set(composition) - set(OXIDE_ORDER))
     if unknown:
@@ -75,6 +108,34 @@ def normalize_wt_percent(composition: dict[str, float]) -> dict[str, float]:
     if total <= 0:
         raise ValueError("Composition total must be positive.")
     return {oxide: value * 100.0 / total for oxide, value in ordered.items()}
+
+
+def ordered_component_composition(
+    composition: dict[str, float],
+    component_order: list[str],
+) -> dict[str, float]:
+    unknown = sorted(set(composition) - set(component_order))
+    if unknown:
+        raise ValueError(f"Unknown component(s): {', '.join(unknown)}")
+    return {component: float(composition.get(component, 0.0)) for component in component_order}
+
+
+def normalize_ordered_values(composition: dict[str, float]) -> dict[str, float]:
+    total = sum(composition.values())
+    if total <= 0:
+        raise ValueError("Composition total must be positive.")
+    return {key: value * 100.0 / total for key, value in composition.items()}
+
+
+def component_order_for_entry(entry: dict, composition: dict[str, float], database: str) -> list[str]:
+    configured = entry.get("component_order") or entry.get("element_order")
+    if configured is not None:
+        if not isinstance(configured, list) or not all(isinstance(item, str) for item in configured):
+            raise ValueError("component_order must be a JSON list of strings.")
+        return configured
+    order = [component for _, component in build_components_for_database(database)]
+    order.extend(sorted(component for component in composition if component not in order))
+    return order
 
 
 def config_base_dir(config_path: Path) -> Path:
@@ -207,6 +268,141 @@ def write_composition(
     print(f"Wrote {summary_path}")
 
 
+def write_component_composition(
+    model: ComponentComposition,
+    outdir: Path = OUTDIR,
+    database: str | None = None,
+) -> None:
+    database_name = resolve_database_name(database or model.database)
+    db = DATABASES[database_name]
+    build_components = build_components_for_database(database_name)
+    outdir.mkdir(parents=True, exist_ok=True)
+    raw = ordered_component_composition(model.raw_wt_percent, model.component_order)
+    normalized = normalize_ordered_values(raw)
+    build_bulk_values = {}
+    missing = []
+    for source_name, component in build_components:
+        value = aliased_component_value(normalized, source_name, component)
+        if value is None:
+            missing.append(source_name)
+        else:
+            build_bulk_values[source_name] = value
+    if missing:
+        all_components = [comp for _, comp in build_components]
+        provided_components = sorted(normalized.keys())
+        available_databases = ", ".join(sorted(DATABASES.keys()))
+        raise ValueError(
+            f"Component composition for {model.project} is missing BUILD component(s): "
+            f"{', '.join(missing)}\n\n"
+            f"Your database '{database_name}' requires all these components:\n"
+            f"  {', '.join(all_components)}\n\n"
+            f"Your composition provides:\n"
+            f"  {', '.join(provided_components)}\n\n"
+            f"Solutions:\n"
+            f"  1. Add the missing component(s) to components_wt_percent in your model\n"
+            f"  2. Switch to a database that matches your composition\n"
+            f"  3. Available databases: {available_databases}\n"
+            f"  See docs/icy_worlds_guide.md for database selection guidance."
+        )
+
+    build_metadata = {
+        "database_name": database_name,
+        "thermodynamic_database": db.database_file,
+        "solution_model_file": db.solution_model_file,
+        "active_components": [
+            {"source_name": source_name, "component": component}
+            for source_name, component in build_components
+        ],
+        "bulk_values_normalized_wt_percent": build_bulk_values,
+        "bulk_values_order": [component for _, component in build_components],
+        "excluded_phases": list(db.excluded_phases),
+        "solution_models": list(db.solution_models),
+    }
+
+    document = {
+        "project": model.project,
+        "description": model.description,
+        "units": "wt%",
+        "composition_basis": COMPONENT_COMPOSITION_BASIS,
+        "component_label": model.component_label,
+        "component_order": model.component_order,
+        "composition_raw": raw,
+        "composition_normalized": normalized,
+        "scientific_status": model.scientific_status,
+        "model_scope": model.model_scope,
+        "planetprofile_readiness": model.planetprofile_readiness,
+        "composition_interpretation": model.composition_interpretation,
+        "placeholder": False,
+        "literature_proxy": model.literature_proxy,
+        "source_note": model.source_note,
+        "perplex_build": build_metadata,
+        "default_perplex_build": build_metadata,
+        "omitted_oxides_from_build": [],
+        "omitted_oxides_from_default_build": [],
+        "notes": [
+            "Use normalized values in Perple_X BUILD unless you intentionally want unnormalized amounts.",
+            "This component composition is not an oxide GUI model; it is intended for element/volatile-bearing icy-world recipes.",
+            "Check that the selected thermodynamic data file, solution model file, excluded phases, and P-T range match the intended science case.",
+        ],
+    }
+
+    json_path = outdir / f"{model.project}.json"
+    json_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
+    values_path = outdir / f"{model.project}_bulk_values.txt"
+    with values_path.open("w", encoding="utf-8") as handle:
+        handle.write(" ".join(f"{build_bulk_values[source_name]:.8f}" for source_name, _ in build_components))
+        handle.write("\n")
+
+    summary_path = outdir / f"{model.project}_summary.txt"
+    with summary_path.open("w", encoding="utf-8") as handle:
+        handle.write(f"{model.project}\n")
+        handle.write(f"{model.description}\n")
+        handle.write(f"{model.source_note}\n\n")
+        handle.write(f"Normalized {model.component_label} composition, wt%:\n")
+        for component in model.component_order:
+            handle.write(f"{component:8s} {normalized[component]:10.5f}\n")
+        handle.write(f"\nTotal: {sum(normalized.values()):.5f}\n")
+        handle.write(f"\n{database_name} BUILD values, normalized wt%:\n")
+        for source_name, component in build_components:
+            handle.write(f"{component:8s} {build_bulk_values[source_name]:10.5f}\n")
+
+    print(f"Wrote {json_path}")
+    print(f"Wrote {values_path}")
+    print(f"Wrote {summary_path}")
+
+
+def aliased_component_value(
+    composition: dict[str, float],
+    source_name: str,
+    component: str,
+) -> float | None:
+    """Return a bulk value from either the oxide-style source name or Perple_X alias."""
+    if source_name == component:
+        return composition.get(source_name)
+    source_present = source_name in composition
+    component_present = component in composition
+    if not source_present and not component_present:
+        return None
+    if source_present and not component_present:
+        return composition[source_name]
+    if component_present and not source_present:
+        return composition[component]
+
+    source_value = composition[source_name]
+    component_value = composition[component]
+    if abs(source_value) <= OMITTED_OXIDE_THRESHOLD and abs(component_value) > OMITTED_OXIDE_THRESHOLD:
+        return component_value
+    return source_value
+
+
+def write_configured_composition(model: CompositionConfig, outdir: Path = OUTDIR) -> None:
+    if isinstance(model, ComponentComposition):
+        write_component_composition(model, outdir=outdir)
+    else:
+        write_composition(model, outdir=outdir)
+
+
 def omitted_oxides_from_default_build(
     raw: dict[str, float],
     normalized: dict[str, float],
@@ -229,10 +425,54 @@ def omitted_oxides_from_default_build(
     return omitted
 
 
+def component_composition_from_config_entry(
+    entry: dict,
+    default_database: str = DEFAULT_DATABASE,
+) -> ComponentComposition | None:
+    composition = None
+    for key in COMPONENT_COMPOSITION_KEYS:
+        if key in entry:
+            composition = entry[key]
+            break
+    if composition is None:
+        return None
+    if not isinstance(composition, dict):
+        raise ValueError(f"Component composition for {entry.get('project', '<unknown>')} must be a JSON object.")
+
+    project = entry.get("project")
+    if not project:
+        raise ValueError("Each inline component model must define a project name.")
+    database_name = resolve_database_name(entry.get("database", default_database))
+    return ComponentComposition(
+        project=project,
+        description=entry.get("description", project),
+        raw_wt_percent=composition,
+        component_order=component_order_for_entry(entry, composition, database_name),
+        component_label=entry.get("component_label", "component"),
+        source_note=entry.get("source_note", "Component composition entered in the model config."),
+        scientific_status=entry.get("scientific_status", "user_defined"),
+        model_scope=entry.get("model_scope", "icy_world_component_model"),
+        planetprofile_readiness=entry.get(
+            "planetprofile_readiness",
+            "not_assessed_for_planetprofile_science",
+        ),
+        composition_interpretation=entry.get(
+            "composition_interpretation",
+            "User-defined Perple_X component composition; scientific interpretation was not provided in the config.",
+        ),
+        literature_proxy=bool(entry.get("literature_proxy", False)),
+        database=database_name,
+    )
+
+
 def model_from_config_entry(
     entry: dict,
     default_database: str = DEFAULT_DATABASE,
-) -> LunarComposition | None:
+) -> CompositionConfig | None:
+    component_model = component_composition_from_config_entry(entry, default_database=default_database)
+    if component_model is not None:
+        return component_model
+
     composition = (
         entry.get("oxides_wt_percent")
         or entry.get("raw_wt_percent")
@@ -270,7 +510,7 @@ def models_from_config(
     config_path: Path,
     project: str | None = None,
     database_override: str | None = None,
-) -> list[LunarComposition]:
+) -> list[CompositionConfig]:
     if not config_path.exists():
         raise FileNotFoundError(
             f"Missing config file: {config_path}. Copy configs/models.example.json to configs/models.json "
@@ -278,7 +518,7 @@ def models_from_config(
         )
     data = json.loads(config_path.read_text(encoding="utf-8"))
     default_database = resolve_database_name(database_override or data.get("database", DEFAULT_DATABASE))
-    models: list[LunarComposition] = []
+    models: list[CompositionConfig] = []
     for entry in data.get("models", []):
         if project and entry.get("project") != project:
             continue
@@ -299,7 +539,7 @@ def configured_or_default_models(
     config_path: Path,
     project: str | None = None,
     database_override: str | None = None,
-) -> list[LunarComposition]:
+) -> list[CompositionConfig]:
     if config_path.exists():
         models = models_from_config(config_path, project=project, database_override=database_override)
         data = json.loads(config_path.read_text(encoding="utf-8"))
@@ -314,7 +554,7 @@ def configured_or_default_models(
     return [replace(model, database=default_database) for model in lunar_models()]
 
 
-def lunar_models() -> list[LunarComposition]:
+def lunar_models() -> list[CompositionConfig]:
     return [
         LunarComposition(
             project="moon_far_highlands_surface_proxy",
@@ -368,7 +608,7 @@ def lunar_models() -> list[LunarComposition]:
     ]
 
 
-def placeholder_models() -> list[LunarComposition]:
+def placeholder_models() -> list[CompositionConfig]:
     return lunar_models()
 
 
@@ -395,10 +635,14 @@ def main(argv: list[str] | None = None) -> None:
     if not models:
         print("No inline compositions to generate; using configured composition files as-is.")
         return
+    wrote_lunar_proxy = False
     for model in models:
         outdir = resolve_path("compositions", config_base_dir(config_path))
-        write_composition(model, outdir=outdir)
-    print("\nWARNING:", MODEL_STATUS)
+        write_configured_composition(model, outdir=outdir)
+        if isinstance(model, LunarComposition) and model.source_note == MODEL_STATUS:
+            wrote_lunar_proxy = True
+    if wrote_lunar_proxy:
+        print("\nWARNING:", MODEL_STATUS)
 
 
 if __name__ == "__main__":

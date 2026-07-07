@@ -6,12 +6,16 @@ Normalized oxide composition, wt%:
 SiO2       45.50000
 TiO2        0.60000
 Al2O3      24.00000
+Cr2O3       0.00000
 FeO         5.90000
+MnO         0.00000
+NiO         0.00000
 MgO         7.50000
 CaO        15.90000
 Na2O        0.60000
 K2O         0.00000
 P2O5        0.00000
+H2O         0.00000
 
 Total: 100.00000
 

@@ -76,7 +76,7 @@ def show_batch_workspace(config_path: Path, config: dict[str, Any], models: list
     st.caption("Generate multiple compositions with systematic parameter variations")
 
     if not models:
-        st.warning("No models available. Create a base composition first in Build Composition mode.")
+        st.warning("No models available. Create a base composition first in Composition > Build.")
         return
 
     # Select base model

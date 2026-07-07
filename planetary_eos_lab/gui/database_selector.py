@@ -18,6 +18,10 @@ from planetary_eos_lab.core.database_utils import (
 DEFAULT_BUILD_TEMPLATES = {
     "stx21": "build_inputs/lunar_stx21_template.build.in",
     "hp633": "build_inputs/lunar_hp633_template.build.in",
+    "dew17_hhph": "build_inputs/icy_dew17_hhph_template.build.in",
+    "hpha02_hydrous": "build_inputs/icy_hpha02_hydrous_simple_template.build.in",
+    "dew13_hydrous": "build_inputs/icy_dew13_hydrous_template.build.in",
+    "dew17_comet": "build_inputs/icy_dew17_comet_template.build.in",
 }
 
 
@@ -48,7 +52,7 @@ def show_database_selector(config: dict[str, Any], config_path: Path) -> str:
         st.code(describe_database(selected), language="text")
 
         active = sorted(get_active_oxides(selected))
-        st.caption(f"**Modeled oxides ({len(active)})**: {', '.join(active)}")
+        st.caption(f"**Modeled components/oxides ({len(active)})**: {', '.join(active)}")
 
         source_only = get_source_only_oxides(selected)
         if source_only:
@@ -108,5 +112,11 @@ def database_selector_help_text() -> str:
   - Default BUILD excludes `q`, `crst`, and `trd` to avoid incomplete seismic properties
   - Use when TiO2 or K2O need to be passed to BUILD
 
-The database choice affects which oxides are included in Perple_X BUILD calculations.
+- **dew17_hhph**, **dew13_hydrous**, **dew17_comet**: element/component setups for volatile-bearing icy-world candidates
+  - Use Perple_X component names such as H2, O2, S2, N2, C, Mg, Si, Fe
+
+- **hpha02_hydrous**: hydrous oxide/component setup
+  - Uses component names such as SIO2, AL2O3, FEO, MGO, CAO, NA2O, H2O
+
+The database choice affects which oxides or components are included in Perple_X BUILD calculations.
 """

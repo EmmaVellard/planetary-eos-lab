@@ -22,7 +22,13 @@ DEFAULT_BUILD_TEMPLATE = BASE_DIR / "build_inputs" / "lunar_stx21_template.build
 DEFAULT_BUILD_TEMPLATES = {
     "stx21": DEFAULT_BUILD_TEMPLATE,
     "hp633": BASE_DIR / "build_inputs" / "lunar_hp633_template.build.in",
+    "dew17_hhph": BASE_DIR / "build_inputs" / "icy_dew17_hhph_template.build.in",
+    "hpha02_hydrous": BASE_DIR / "build_inputs" / "icy_hpha02_hydrous_simple_template.build.in",
+    "dew13_hydrous": BASE_DIR / "build_inputs" / "icy_dew13_hydrous_template.build.in",
+    "dew17_comet": BASE_DIR / "build_inputs" / "icy_dew17_comet_template.build.in",
 }
+COMPONENT_COMPOSITION_BASIS = "perplex_components"
+COMPONENT_COMPOSITION_ALIASES = {"perplex_components", "components", "elements", "element_components"}
 
 PERPLEX_OPTION_TEXT = """\
 warn_interactive F
@@ -72,6 +78,10 @@ HP633_WERAMI_INPUT_SEQUENCE = (
 DEFAULT_WERAMI_INPUT_SEQUENCES = {
     "stx21": DEFAULT_WERAMI_INPUT_SEQUENCE,
     "hp633": HP633_WERAMI_INPUT_SEQUENCE,
+    "dew17_hhph": HP633_WERAMI_INPUT_SEQUENCE,
+    "hpha02_hydrous": HP633_WERAMI_INPUT_SEQUENCE,
+    "dew13_hydrous": HP633_WERAMI_INPUT_SEQUENCE,
+    "dew17_comet": HP633_WERAMI_INPUT_SEQUENCE,
 }
 WERAMI_INPUT_DESCRIPTION = {
     "mode": "2D grid table",
@@ -161,6 +171,7 @@ class ModelConfig:
     output_dir: Path
     work_dir: Path
     database: str = DEFAULT_DATABASE
+    planetprofile_first_axis: str = "T"
     planetprofile_filename: str | None = None
     scientific_status: str | None = None
     model_scope: str | None = None
@@ -187,6 +198,22 @@ def resolve_path(value: str | Path, base_dir: Path) -> Path:
     if path.is_absolute():
         return path
     return (base_dir / path).resolve()
+
+
+def planetprofile_first_axis_from_config(model: dict) -> str:
+    value = str(model.get("planetprofile_first_axis", "T")).strip().upper()
+    if value in {"TEMPERATURE", "T(K)"}:
+        value = "T"
+    elif value in {"PRESSURE", "P(BAR)"}:
+        value = "P"
+    if value not in {"T", "P"}:
+        raise ValueError("planetprofile_first_axis must be 'T' or 'P'.")
+    return value
+
+
+def is_component_composition_data(data: dict) -> bool:
+    basis = str(data.get("composition_basis", "")).strip().lower().replace("-", "_")
+    return basis in COMPONENT_COMPOSITION_ALIASES or "component_order" in data
 
 
 def default_werami_sequence_for_database(database: str) -> tuple[str, ...]:
@@ -225,8 +252,10 @@ def load_config(
     for model in data["models"]:
         project = model["project"]
         model_database = resolve_database_name(model.get("database", pipeline_database))
-        if "build_input_file" in model:
-            build_input_file = resolve_path(model["build_input_file"], base_dir)
+        planetprofile_first_axis = planetprofile_first_axis_from_config(model)
+        model_build_template = model.get("build_input_file") or model.get("build_template_file")
+        if model_build_template:
+            build_input_file = resolve_path(model_build_template, base_dir)
         elif configured_build_template:
             configured_template = resolve_path(configured_build_template, base_dir)
             if model_database != "stx21" and is_stx21_default_template(configured_template):
@@ -252,6 +281,7 @@ def load_config(
                 output_dir=output_dir,
                 work_dir=work_dir,
                 database=model_database,
+                planetprofile_first_axis=planetprofile_first_axis,
                 planetprofile_filename=model.get("planetprofile_filename"),
                 scientific_status=model.get("scientific_status"),
                 model_scope=model.get("model_scope"),
@@ -399,6 +429,8 @@ def omitted_composition_oxides(
     database: str = DEFAULT_DATABASE,
 ) -> list[tuple[str, float]]:
     data, composition = load_normalized_composition(composition_file)
+    if is_component_composition_data(data):
+        return []
     active_oxides = active_component_oxides(database)
     omitted: list[tuple[str, float]] = []
     for oxide in composition_oxide_order(data, composition):
@@ -413,6 +445,8 @@ def omitted_oxide_records(
     database: str = DEFAULT_DATABASE,
 ) -> list[dict[str, float | str]]:
     data, composition = load_normalized_composition(composition_file)
+    if is_component_composition_data(data):
+        return []
     active_oxides = active_component_oxides(database)
     records: list[dict[str, float | str]] = []
     raw = data.get("composition_raw", {})
@@ -469,18 +503,60 @@ def composition_bulk_values(
     composition_file: Path,
     database: str = DEFAULT_DATABASE,
 ) -> str:
-    _, composition = load_normalized_composition(composition_file)
+    data, composition = load_normalized_composition(composition_file)
     components = active_components_for_database(database)
-    missing = [oxide for oxide, _ in components if oxide not in composition]
-    if missing:
-        raise PipelineError(
-            f"Composition file is missing oxide(s) needed for BUILD: {', '.join(missing)}"
-        )
-
+    missing: list[str] = []
     values: list[str] = []
-    for oxide, _ in components:
-        values.append(f"{composition[oxide]:.8f}")
+    for source_name, component in components:
+        value = aliased_component_value(composition, source_name, component)
+        if value is None:
+            missing.append(source_name)
+            continue
+        values.append(f"{value:.8f}")
+    if missing:
+        noun = "component(s)" if is_component_composition_data(data) else "oxide(s)"
+        all_required = [comp for _, comp in components]
+        basis = data.get("composition_basis", "oxides" if not is_component_composition_data(data) else "components")
+        available_databases = ", ".join(sorted(DATABASES.keys()))
+
+        error_msg = (
+            f"Composition file is missing {noun} needed for BUILD: {', '.join(missing)}\n\n"
+            f"Composition file: {composition_file}\n"
+            f"Composition basis: {basis}\n"
+            f"Database: {database}\n"
+            f"Required {noun}: {', '.join(all_required)}\n\n"
+            f"Solutions:\n"
+            f"  1. Regenerate the composition file with all required {noun}\n"
+            f"  2. Switch to a database that matches your composition\n"
+            f"  3. Available databases: {available_databases}\n"
+            f"  See docs/icy_worlds_guide.md for guidance."
+        )
+        raise PipelineError(error_msg)
     return " ".join(values)
+
+
+def aliased_component_value(
+    composition: dict[str, float],
+    source_name: str,
+    component: str,
+) -> float | None:
+    """Return a bulk value from either the source name or Perple_X component alias."""
+    if source_name == component:
+        return composition.get(source_name)
+    source_present = source_name in composition
+    component_present = component in composition
+    if not source_present and not component_present:
+        return None
+    if source_present and not component_present:
+        return composition[source_name]
+    if component_present and not source_present:
+        return composition[component]
+
+    source_value = composition[source_name]
+    component_value = composition[component]
+    if abs(source_value) <= OMITTED_OXIDE_THRESHOLD and abs(component_value) > OMITTED_OXIDE_THRESHOLD:
+        return component_value
+    return source_value
 
 
 def active_component_records(database: str = DEFAULT_DATABASE) -> list[dict[str, str]]:
@@ -582,12 +658,55 @@ def default_component_status(
     ]
 
 
+def extract_pt_range_from_template(template_path: Path) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """Extract P and T ranges from BUILD template file.
+
+    Returns:
+        ((p_min, p_max), (t_min, t_max)) in bar and K, or None if not found
+    """
+    try:
+        lines = template_path.read_text().splitlines()
+        # Look for lines matching "<pmin> <pmax>" and "<tmin> <tmax>"
+        # These appear after the "1" (grid option) and before "y" (thermodynamic components)
+        # Typical sequence: ...component list...empty line...n...1...<P range>...<T range>...y...
+        p_range = None
+        t_range = None
+        for i, line in enumerate(lines):
+            tokens = line.strip().split()
+            if len(tokens) == 2:
+                try:
+                    val1, val2 = float(tokens[0]), float(tokens[1])
+                    # Check if this looks like a PT range (ascending order, reasonable values)
+                    if val1 < val2:
+                        # Pressure range: typically 1-200000 bar (favor larger numbers)
+                        if val2 >= 1000 and p_range is None:
+                            p_range = (val1, val2)
+                        # Temperature range: typically 200-4000 K (smaller than pressure)
+                        elif 200 <= val1 and val2 <= 4000 and t_range is None:
+                            t_range = (val1, val2)
+                except (ValueError, IndexError):
+                    continue
+        if p_range and t_range:
+            return (p_range, t_range)
+    except Exception:
+        pass
+    return None
+
+
 def validate_thermodynamic_setup(perplex_dir: Path, model: ModelConfig) -> None:
     template_database = default_template_database(model.build_input_file)
     if template_database and template_database != model.database:
+        correct_template = DEFAULT_BUILD_TEMPLATES.get(model.database)
+        template_suggestion = f"\n  Correct template: {correct_template}" if correct_template else ""
         raise PipelineError(
-            f"BUILD template {model.build_input_file.name} is for '{template_database}', "
-            f"but model '{model.project}' is configured for '{model.database}'."
+            f"BUILD template mismatch for model '{model.project}':\n"
+            f"  Template: {model.build_input_file.name} (designed for '{template_database}')\n"
+            f"  Model database: {model.database}{template_suggestion}\n\n"
+            f"Solutions:\n"
+            f"  1. Change model database to '{template_database}' in your config\n"
+            f"  2. Use the correct BUILD template for '{model.database}'\n"
+            f"  3. Remove 'build_input_file' from model to use default template\n\n"
+            f"See docs/icy_worlds_guide.md for database-template compatibility."
         )
 
     if not is_default_build_template(model):
@@ -595,6 +714,10 @@ def validate_thermodynamic_setup(perplex_dir: Path, model: ModelConfig) -> None:
 
     database_file = database_path(perplex_dir, model.database)
     solution_model_file = solution_model_path(perplex_dir, model.database)
+    if not database_file.exists():
+        raise FileNotFoundError(f"Missing Perple_X thermodynamic data file: {database_file}")
+    if not solution_model_file.exists():
+        raise FileNotFoundError(f"Missing Perple_X solution model file: {solution_model_file}")
     declared_components = {
         component.upper()
         for component in read_perplex_database_components(database_file)
@@ -610,8 +733,32 @@ def validate_thermodynamic_setup(perplex_dir: Path, model: ModelConfig) -> None:
             f"{model.database} BUILD template requires component(s) not declared in {database_file.name}: "
             f"{', '.join(missing_components)}"
         )
-    if not solution_model_file.exists():
-        raise FileNotFoundError(f"Missing Perple_X solution model file: {solution_model_file}")
+
+    # Validate PT range consistency (warning only, not fatal)
+    db_config = DATABASES[model.database]
+    template_pt = extract_pt_range_from_template(model.build_input_file)
+    if template_pt:
+        (template_p_min, template_p_max), (template_t_min, template_t_max) = template_pt
+        config_p_min = db_config.pt_range["pressure_bar"]["min"]
+        config_p_max = db_config.pt_range["pressure_bar"]["max"]
+        config_t_min = db_config.pt_range["temperature_k"]["min"]
+        config_t_max = db_config.pt_range["temperature_k"]["max"]
+
+        # Check if template PT significantly exceeds database calibration (>10% beyond)
+        if template_p_max > config_p_max * 1.1 or template_p_min < config_p_min * 0.9:
+            print(
+                f"WARNING: BUILD template pressure range ({template_p_min:.0f}-{template_p_max:.0f} bar) "
+                f"extends beyond {model.database} database calibration ({config_p_min:.0f}-{config_p_max:.0f} bar). "
+                f"Results may be unreliable.",
+                file=sys.stderr,
+            )
+        if template_t_max > config_t_max * 1.1 or template_t_min < config_t_min * 0.9:
+            print(
+                f"WARNING: BUILD template temperature range ({template_t_min:.0f}-{template_t_max:.0f} K) "
+                f"extends beyond {model.database} database calibration ({config_t_min:.0f}-{config_t_max:.0f} K). "
+                f"Results may be unreliable.",
+                file=sys.stderr,
+            )
 
 
 def validate_default_thermodynamic_setup(perplex_dir: Path, model: ModelConfig) -> None:
@@ -670,6 +817,8 @@ def render_build_input(perplex_dir: Path, model: ModelConfig) -> str:
         "${OUTPUT_DIR}": template_path(model.output_dir),
         "${WORK_DIR}": template_path(model.work_dir),
         "${BUILD_TITLE}": build_title,
+        "${THERMODYNAMIC_DATABASE_FILE}": template_path(database_path(perplex_dir, model.database)),
+        "${SOLUTION_MODEL_FILE}": template_path(solution_model_path(perplex_dir, model.database)),
     }
     if "${PERPLEX_BULK_VALUES}" in text:
         replacements["${PERPLEX_BULK_VALUES}"] = composition_bulk_values(
@@ -681,18 +830,16 @@ def render_build_input(perplex_dir: Path, model: ModelConfig) -> str:
     return text
 
 
-def run_build_if_input_exists(perplex_dir: Path, model: ModelConfig) -> None:
+def run_build(perplex_dir: Path, model: ModelConfig) -> None:
     log_path = model.output_dir / "build.log"
     dat_file = project_dat_file(model.work_dir, model.project)
 
     if not model.build_input_file.exists():
-        log_path.write_text(
-            "BUILD skipped.\n"
-            f"Build input file not found: {model.build_input_file}\n"
-            f"Existing .dat required: {dat_file}\n"
+        raise FileNotFoundError(
+            f"Missing BUILD input file for {model.project}: {model.build_input_file}. "
+            "This pipeline always runs Perple_X BUILD before VERTEX/WERAMI; provide a valid "
+            "build_input_file or configure a database with a bundled BUILD template."
         )
-        print(f"BUILD skipped for {model.project}; no build input file at {model.build_input_file}")
-        return
 
     print(f"Running BUILD for {model.project}")
     clean_project_work_files(model.work_dir, model.project)
@@ -713,7 +860,7 @@ def require_dat_file(work_dir: Path, project: str) -> None:
     if not dat_file.exists():
         raise FileNotFoundError(
             f"Missing Perple_X .dat file for {project}: {dat_file}. "
-            "Create it with BUILD or provide build_input_file in the config."
+            "BUILD must create this file before VERTEX can run."
         )
 
 
@@ -753,7 +900,7 @@ def run_werami(perplex_dir: Path, model: ModelConfig) -> Path:
         raw_tab,
         native_tab,
         source_name=raw_tab.name,
-        first_axis="T",
+        first_axis=model.planetprofile_first_axis,
     )
     return planetprofile_tab
 
@@ -792,7 +939,7 @@ def run_model(perplex_dir: Path, model: ModelConfig, *, skip_validation: bool = 
 
     option_path = write_options(model.work_dir)
     print(f"Wrote {option_path}")
-    run_build_if_input_exists(perplex_dir, model)
+    run_build(perplex_dir, model)
     require_dat_file(model.work_dir, model.project)
 
     try: 

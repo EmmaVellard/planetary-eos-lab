@@ -85,10 +85,11 @@ See [DOCKER.md](DOCKER.md) for detailed Docker usage.
 
 ## GUI Workflow
 
-The left menu has two main workspaces:
+The left menu has three main workspaces:
 
-- `Build Composition`: create a new model, copy an existing model, edit oxide values and metadata, preview normalization, and delete saved models from `configs/models.json`.
+- `Composition`: create a new model in `Composition > Build`, generate sweeps in `Composition > Batch Processing`, review saved models in `Composition > Catalog`, edit oxide values and metadata, preview normalization, and delete saved models from `configs/models.json`.
 - `Run Pipeline`: select a saved model, review caveats, generate composition files, run Perple_X, validate outputs, make comparison plots, and export PlanetProfile tables.
+- `Compare Models`: inspect interactive comparisons across saved model outputs.
 
 GitHub hosts this workbench only; it does not include BUILD, VERTEX, WERAMI, or Perple_X datafiles.
 
@@ -140,6 +141,20 @@ planetary-eos-run --database hp633
 ```
 
 The GUI still lets you record `TiO2`, `K2O`, and `P2O5` because they are common source-composition fields. With the default stx21 profile, all three are source-only. With the default hp633 profile, TiO2 and K2O are passed to BUILD, while P2O5 remains source-only. The hp633 template also excludes `q`, `crst`, and `trd` so the default PlanetProfile-facing seismic table remains finite. Use a custom thermodynamic database, solution model file, and BUILD input before interpreting P-bearing effects.
+
+
+### Icy-World Component Models
+
+Moon-style models can use `oxides_wt_percent`. Icy-world models can instead use `components_wt_percent` for Perple_X components such as `H2`, `C`, `Mg`, `S2`, `O2`, `N2`, or hydrous components such as `H2O`. The tool writes a generated composition file, renders a BUILD input template, runs BUILD/VERTEX/WERAMI, validates the table, and exports PlanetProfile-ready output. BUILD is required for every run; the pipeline does not copy existing PlanetProfile `.dat` or `.tab` files and does not fall back to prebuilt `.dat` files.
+
+See `configs/icy_worlds.example.json` for first-pass CI, CM, CV, cometary, Ganymede-like, and hydrous CV3 examples.
+
+**📖 For detailed guidance on modeling icy worlds (Europa, Titan, comets, etc.), see [docs/icy_worlds_guide.md](docs/icy_worlds_guide.md)** which covers:
+- Database selection guide (when to use dew17_hhph vs dew13_hydrous vs others)
+- Component vs oxide compositions
+- Example bodies (Europa core, Titan mantle, Enceladus, Comet 67P)
+- Composition data sources and references
+- Troubleshooting common issues
 
 ## Command Line Interface
 

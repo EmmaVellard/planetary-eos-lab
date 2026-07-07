@@ -57,6 +57,65 @@ DATABASES = {
             "P2O5 remains source-only unless a custom P-bearing database is supplied"
         ),
     ),
+    "dew17_hhph": ThermodynamicDatabase(
+        name="dew17_hhph",
+        database_file="dew17hp622ver_elements.dat",
+        solution_model_file="solution_model.dat",
+        excluded_phases=(
+            "stv", "perL", "limL", "corL", "hemL", "qL", "h2oL", "foL", "faL", "woL",
+            "enL", "diL", "silL", "anL", "sil8L", "fo8L", "fa8L", "q8L", "cess", "qjL",
+            "dijL", "ctjL", "fojL", "fajL", "hmjL", "foTL", "faTL",
+        ),
+        solution_models=(
+            "Gt(H)", "Fper(H)", "Mpv(H)", "Cpv(H)", "CFer(H)", "Aki(H)", "O(JH)",
+            "Wad(H)", "Ring(H)", "Cpx(JH)", "Opx(JH)", "Hpx(H)", "NAl(H)", "Cor(H)",
+        ),
+        pt_range={
+            "pressure_bar": {"min": 1.0, "max": 140000.0},
+            "temperature_k": {"min": 250.0, "max": 3000.0},
+        },
+        description="DEW17/Holland-Powell element setup for undifferentiated chondrite-style icy-world interiors",
+    ),
+    "hpha02_hydrous": ThermodynamicDatabase(
+        name="hpha02_hydrous",
+        database_file="hpha02ver.dat",
+        solution_model_file="solution_model.dat",
+        excluded_phases=("stv", "coe", "h2oL"),
+        solution_models=("Opx(HP)", "O(HP)", "Sp(HP)", "Cpx(HP)", "Gt(HP)", "Wus", "Atg(PN)", "Amph(DHP)", "Chum", "St(HP)", "melt(HP)"),
+        pt_range={
+            "pressure_bar": {"min": 1.0, "max": 7000.0},
+            "temperature_k": {"min": 250.0, "max": 320.0},
+        },
+        description="HP02 hydrous oxide setup for cold, shallow chondrite plus water smoke-test compositions",
+    ),
+    "dew13_hydrous": ThermodynamicDatabase(
+        name="dew13_hydrous",
+        database_file="dew13hp622ver_elements.dat",
+        solution_model_file="solution_model.dat",
+        excluded_phases=("h2oL", "SO2", "CO"),
+        solution_models=("O(HP)", "Opx(HP)", "O(JH)", "Cpx(JH)"),
+        pt_range={
+            "pressure_bar": {"min": 1.0, "max": 50000.0},
+            "temperature_k": {"min": 273.15, "max": 1000.0},
+        },
+        description="DEW13/Holland-Powell hydrous element setup for differentiated icy-world silicates",
+    ),
+    "dew17_comet": ThermodynamicDatabase(
+        name="dew17_comet",
+        database_file="dew17hp622ver_elements.dat",
+        solution_model_file="solution_model.dat",
+        excluded_phases=("foTL", "faTL", "fa8L", "fo8L", "fojL", "fajL", "qjL", "q8L", "hmjL", "ma", "geik"),
+        solution_models=(
+            "Cpx(HGP)", "Pl(I1,HP)", "Fsp(C1)", "melt(HGP)", "O(HGP)", "Opx(HGP)",
+            "Sp(HGP)", "Gt(HGP)", "Crd(HGP)", "Bi(HGP)", "Mica(W)", "Ep(HP11)",
+            "cAmph(G)", "Ilm(WPH)", "Chl(W)",
+        ),
+        pt_range={
+            "pressure_bar": {"min": 1.0, "max": 50000.0},
+            "temperature_k": {"min": 273.15, "max": 1000.0},
+        },
+        description="DEW17/Holland-Powell element setup for volatile-rich cometary compositions",
+    ),
 }
 
 

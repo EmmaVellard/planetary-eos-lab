@@ -6,34 +6,46 @@
     "SiO2",
     "TiO2",
     "Al2O3",
+    "Cr2O3",
     "FeO",
+    "MnO",
+    "NiO",
     "MgO",
     "CaO",
     "Na2O",
     "K2O",
-    "P2O5"
+    "P2O5",
+    "H2O"
   ],
   "composition_raw": {
     "SiO2": 45.4,
     "TiO2": 3.9,
     "Al2O3": 14.9,
+    "Cr2O3": 0.0,
     "FeO": 14.1,
+    "MnO": 0.0,
+    "NiO": 0.0,
     "MgO": 9.2,
     "CaO": 11.8,
     "Na2O": 0.6,
     "K2O": 0.0,
-    "P2O5": 0.0
+    "P2O5": 0.0,
+    "H2O": 0.0
   },
   "composition_normalized": {
     "SiO2": 45.44544544544545,
     "TiO2": 3.9039039039039043,
     "Al2O3": 14.914914914914917,
+    "Cr2O3": 0.0,
     "FeO": 14.114114114114116,
+    "MnO": 0.0,
+    "NiO": 0.0,
     "MgO": 9.20920920920921,
     "CaO": 11.811811811811813,
     "Na2O": 0.6006006006006006,
     "K2O": 0.0,
-    "P2O5": 0.0
+    "P2O5": 0.0,
+    "H2O": 0.0
   },
   "scientific_status": "surface_proxy_smoke_test",
   "model_scope": "surface_terrane_proxy",
@@ -74,8 +86,12 @@
     ],
     "source_only_oxides": [
       "TiO2",
+      "Cr2O3",
+      "MnO",
+      "NiO",
       "K2O",
-      "P2O5"
+      "P2O5",
+      "H2O"
     ],
     "bulk_values_normalized_wt_percent": {
       "Na2O": 0.6006006006006006,
@@ -135,8 +151,12 @@
     ],
     "source_only_oxides": [
       "TiO2",
+      "Cr2O3",
+      "MnO",
+      "NiO",
       "K2O",
-      "P2O5"
+      "P2O5",
+      "H2O"
     ],
     "bulk_values_normalized_wt_percent": {
       "Na2O": 0.6006006006006006,
@@ -187,6 +207,6 @@
     "Fe is represented as FeO for the silicate component.",
     "Do not include native Fe, Ni, or Cu unless metallic phases and their elastic properties are intentionally modeled.",
     "KREEP/Th/U/K radiogenic effects should mostly be represented in PlanetProfile thermal/radiogenic parameters.",
-    "The stx21ver.dat Perple_X profile models NA2O, MGO, AL2O3, SIO2, CAO, FEO; TiO2, K2O, P2O5 are retained as source-only oxides and omitted from BUILD."
+    "The stx21ver.dat Perple_X profile models NA2O, MGO, AL2O3, SIO2, CAO, FEO; TiO2, Cr2O3, MnO, NiO, K2O, P2O5, H2O are retained as source-only oxides and omitted from BUILD."
   ]
 }

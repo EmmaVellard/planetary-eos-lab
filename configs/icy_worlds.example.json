@@ -1,0 +1,135 @@
+{
+  "perplex_dir": "/path/to/perplex",
+  "database": "dew17_hhph",
+  "models": [
+    {
+      "project": "ci_undifferentiated_dew17_hhph",
+      "description": "CI undifferentiated volatile-bearing component model",
+      "database": "dew17_hhph",
+      "planetprofile_filename": "CI_undifferentiated_hhph_DEW17_generated.tab",
+      "planetprofile_first_axis": "T",
+      "scientific_status": "literature_candidate",
+      "model_scope": "undifferentiated_chondrite",
+      "planetprofile_readiness": "not_assessed_for_planetprofile_science",
+      "composition_interpretation": "Element/component composition adapted from Lodders and Fegley-style CI chondrite bulk values; validate before use.",
+      "source_note": "First-pass CI component model for testing the generated BUILD workflow; not copied from an existing PlanetProfile table.",
+      "component_label": "element/component",
+      "components_wt_percent": {
+        "H2": 2.07,
+        "C": 3.53,
+        "Mg": 9.94,
+        "Al": 0.89,
+        "Si": 10.9,
+        "S2": 5.54,
+        "Ca": 0.95,
+        "Fe": 18.65,
+        "O2": 47.54
+      }
+    },
+    {
+      "project": "cm_undifferentiated_dew17_hhph",
+      "description": "CM undifferentiated volatile-bearing component model",
+      "database": "dew17_hhph",
+      "planetprofile_filename": "CM_undifferentiated_hhph_DEW17_generated.tab",
+      "planetprofile_first_axis": "T",
+      "scientific_status": "literature_candidate",
+      "model_scope": "undifferentiated_chondrite",
+      "planetprofile_readiness": "not_assessed_for_planetprofile_science",
+      "component_label": "element/component",
+      "components_wt_percent": {
+        "H2": 1.44,
+        "C": 2.26,
+        "Mg": 11.8,
+        "Al": 1.16,
+        "Si": 13.04,
+        "S2": 2.77,
+        "Ca": 1.32,
+        "Fe": 21.86,
+        "O2": 44.34
+      }
+    },
+    {
+      "project": "cv_undifferentiated_dew17_hhph",
+      "description": "CV undifferentiated volatile-bearing component model",
+      "database": "dew17_hhph",
+      "planetprofile_filename": "CV_undifferentiated_hhph_DEW17_generated.tab",
+      "planetprofile_first_axis": "T",
+      "scientific_status": "literature_candidate",
+      "model_scope": "undifferentiated_chondrite",
+      "planetprofile_readiness": "not_assessed_for_planetprofile_science",
+      "component_label": "element/component",
+      "components_wt_percent": {
+        "H2": 0.29,
+        "C": 0.55,
+        "Mg": 14.74,
+        "Al": 1.73,
+        "Si": 16.18,
+        "S2": 2.27,
+        "Ca": 1.9,
+        "Fe": 24.22,
+        "O2": 38.13
+      }
+    },
+    {
+      "project": "cv3_hydrous_1wt_hpha02",
+      "description": "CV3 hydrous 1 wt percent H2O-style oxide/component model",
+      "database": "hpha02_hydrous",
+      "planetprofile_filename": "CV3hy1wt_generated.tab",
+      "planetprofile_first_axis": "P",
+      "scientific_status": "literature_candidate",
+      "model_scope": "hydrous_chondrite",
+      "planetprofile_readiness": "not_assessed_for_planetprofile_science",
+      "component_label": "oxide/component",
+      "components_wt_percent": {
+        "SIO2": 34.0,
+        "AL2O3": 3.22,
+        "FEO": 26.83,
+        "MGO": 24.58,
+        "CAO": 2.62,
+        "NA2O": 0.49,
+        "H2O": 0.92
+      }
+    },
+    {
+      "project": "comet_67p_dew17_preview",
+      "description": "Comet 67P volatile-rich component model preview",
+      "database": "dew17_comet",
+      "planetprofile_filename": "Comet_67P_CG_generated.tab",
+      "planetprofile_first_axis": "T",
+      "scientific_status": "literature_candidate",
+      "model_scope": "cometary_bulk_composition",
+      "planetprofile_readiness": "not_assessed_for_planetprofile_science",
+      "component_label": "element/component",
+      "components_wt_percent": {
+        "C": 27.08,
+        "Fe": 6.1,
+        "Si": 10.54,
+        "Mg": 0.99,
+        "H2": 11.4,
+        "O2": 41.06,
+        "N2": 1.03,
+        "S2": 1.81
+      }
+    },
+    {
+      "project": "cm_hydrous_ganymede_core80_preview",
+      "description": "CM hydrous differentiated Ganymede-like silicate component model preview",
+      "database": "dew13_hydrous",
+      "planetprofile_filename": "CM_hydrous_Ganymede_Core80_generated.tab",
+      "planetprofile_first_axis": "T",
+      "scientific_status": "literature_candidate",
+      "model_scope": "differentiated_icy_world_silicate_component",
+      "planetprofile_readiness": "not_assessed_for_planetprofile_science",
+      "component_label": "element/component",
+      "components_wt_percent": {
+        "C": 2.517,
+        "Mg": 13.156,
+        "Si": 14.528,
+        "Fe": 17.425,
+        "H2": 1.602,
+        "O2": 49.419,
+        "S2": 1.353
+      }
+    }
+  ]
+}

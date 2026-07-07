@@ -38,7 +38,7 @@ class PlotModel:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Plot near/far lunar composition and PlanetProfile table comparisons."
+        description="Plot composition and PlanetProfile table comparisons."
     )
     parser.add_argument("--config", default=str(run_perplex.DEFAULT_CONFIG), help="Path to configs/models.json.")
     parser.add_argument("--project", action="append", help="Only plot the selected project. Can be repeated.")
@@ -83,7 +83,54 @@ def load_normalized_composition(path: Path) -> dict[str, float]:
     composition = data.get("composition_normalized")
     if not isinstance(composition, dict):
         raise ValueError(f"Missing composition_normalized in {path}")
-    return {oxide: float(composition.get(oxide, 0.0)) for oxide in OXIDE_ORDER}
+
+    normalized: dict[str, float] = {}
+    for component, value in composition.items():
+        try:
+            normalized[str(component)] = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"Composition value for {component} is not numeric in {path}")
+    return normalized
+
+
+def is_component_composition(path: Path) -> bool:
+    """Check if composition file uses components instead of oxides."""
+    data = json.loads(path.read_text())
+    basis = data.get("composition_basis", "").lower()
+    return "component" in basis or "element" in basis
+
+
+def composition_keys(compositions: list[dict[str, float]], use_oxide_order: bool = True) -> list[str]:
+    """Get ordered list of composition keys.
+
+    Args:
+        compositions: List of composition dictionaries
+        use_oxide_order: If True, prioritize OXIDE_ORDER for ordering (for oxide compositions).
+                        If False, use order from composition files (for component compositions).
+
+    Returns:
+        Ordered list of composition keys with nonzero values
+    """
+    configured_order = [component for composition in compositions for component in composition]
+    nonzero = {
+        component
+        for composition in compositions
+        for component, value in composition.items()
+        if math.isfinite(value) and abs(value) > 1.0e-12
+    }
+    ordered: list[str] = []
+
+    if use_oxide_order:
+        # For oxide compositions, use OXIDE_ORDER for consistent ordering
+        for component in OXIDE_ORDER:
+            if component in nonzero:
+                ordered.append(component)
+
+    # Add any remaining components in order of appearance
+    for component in configured_order:
+        if component in nonzero and component not in ordered:
+            ordered.append(component)
+    return ordered
 
 
 def finite(value: float) -> bool:
@@ -142,18 +189,28 @@ def axis_range(values: list[float]) -> tuple[float, float]:
 
 def composition_plot_svg(models: list[PlotModel]) -> str:
     compositions = [load_normalized_composition(model.composition_file) for model in models]
-    width, height = 1120, 560
-    left, top, plot_width, plot_height = 70, 72, 970, 350
+
+    # Check if any models use component composition
+    is_component = any(is_component_composition(model.composition_file) for model in models)
+    use_oxide_order = not is_component
+
+    keys = composition_keys(compositions, use_oxide_order=use_oxide_order)
+    if not keys:
+        raise ValueError("Selected composition files do not contain nonzero normalized composition values.")
+
+    composition_type = "component" if is_component else "oxide"
+    width, height = 1120, 600
+    left, top, plot_width, plot_height = 82, 104, 938, 330
     bottom = top + plot_height
-    max_value = nice_max(max(max(composition.values()) for composition in compositions))
-    group_width = plot_width / len(OXIDE_ORDER)
+    max_value = nice_max(max(max(composition.get(key, 0.0) for key in keys) for composition in compositions))
+    group_width = plot_width / len(keys)
     bar_width = min(30.0, group_width / (len(models) + 1.4))
 
     svg: list[str] = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
         '<rect width="100%" height="100%" fill="#ffffff"/>',
-        svg_text(width / 2, 34, "Normalized lunar proxy oxide compositions", 22, "middle", "bold"),
-        svg_text(width / 2, 56, "Full source record; TiO2, K2O, and P2O5 are source-only in default stx21 BUILD", 13, "middle"),
+        svg_text(width / 2, 36, f"Normalized {composition_type} composition", 22, "middle", "bold"),
+        svg_text(width / 2, 60, f"Only nonzero {composition_type}s present in the selected composition records are shown", 13, "middle"),
     ]
 
     for tick in range(6):
@@ -164,14 +221,14 @@ def composition_plot_svg(models: list[PlotModel]) -> str:
 
     svg.append(f'<line x1="{left}" y1="{bottom}" x2="{left + plot_width}" y2="{bottom}" stroke="#333"/>')
     svg.append(f'<line x1="{left}" y1="{top}" x2="{left}" y2="{bottom}" stroke="#333"/>')
-    svg.append(svg_text(18, top + plot_height / 2, "wt%", 13, "middle"))
+    svg.append(svg_text(left - 54, top + plot_height / 2, "wt%", 13, "middle"))
 
-    for oxide_index, oxide in enumerate(OXIDE_ORDER):
-        group_x = left + oxide_index * group_width
+    for key_index, key in enumerate(keys):
+        group_x = left + key_index * group_width
         center = group_x + group_width / 2
-        svg.append(svg_text(center, bottom + 24, oxide, 12, "middle"))
+        svg.append(svg_text(center, bottom + 24, key, 12, "middle"))
         for model_index, composition in enumerate(compositions):
-            value = composition[oxide]
+            value = composition.get(key, 0.0)
             bar_height = (value / max_value) * plot_height
             x = center - (len(models) * bar_width) / 2 + model_index * bar_width
             y = bottom - bar_height
@@ -181,7 +238,7 @@ def composition_plot_svg(models: list[PlotModel]) -> str:
                 f'fill="{color}"/>'
             )
 
-    legend_x, legend_y = left, height - 78
+    legend_x, legend_y = left, height - 92
     for index, model in enumerate(models):
         y = legend_y + index * 24
         color = COLORS[index % len(COLORS)]
@@ -208,9 +265,9 @@ def line_points(series: list[tuple[float, float]], x_min: float, x_max: float, y
 
 
 def property_plot_svg(models: list[PlotModel]) -> str:
-    width, height = 1240, 900
+    width, height = 1240, 980
     panel_width, panel_height = 520, 215
-    margin_x, margin_y = 85, 88
+    margin_x, margin_y = 85, 106
     gap_x, gap_y = 90, 58
 
     profiles: dict[tuple[str, str], list[tuple[float, float]]] = {}
@@ -223,7 +280,7 @@ def property_plot_svg(models: list[PlotModel]) -> str:
     svg: list[str] = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
         '<rect width="100%" height="100%" fill="#ffffff"/>',
-        svg_text(width / 2, 34, "Near/far PlanetProfile property comparison", 22, "middle", "bold"),
+        svg_text(width / 2, 34, "Property comparison", 22, "middle", "bold"),
         svg_text(width / 2, 56, "Each curve is the mean value at pressure over the sampled temperature grid", 13, "middle"),
     ]
 
