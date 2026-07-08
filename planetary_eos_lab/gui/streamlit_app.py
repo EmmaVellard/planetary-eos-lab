@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import json
 import math
+import os
+import signal
 import subprocess
 import sys
+import time
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -37,8 +41,16 @@ from planetary_eos_lab.gui.autosave import show_autosave_controls
 from planetary_eos_lab.gui.batch_processor import show_batch_workspace
 from planetary_eos_lab.gui.comparison_tools import show_comparison_workspace
 from planetary_eos_lab.gui.database_selector import (
+    BUILD_TEMPLATE_CUSTOM_CHOICE,
+    BUILD_TEMPLATE_DEFAULT_CHOICE,
     DEFAULT_BUILD_TEMPLATES,
+    available_build_templates,
+    build_template_database,
+    build_template_label,
+    build_template_matches_database_default,
     get_current_database,
+    model_uses_database_default_template,
+    normalize_build_template_path,
     show_database_selector,
 )
 from planetary_eos_lab.gui.import_export import (
@@ -84,6 +96,7 @@ from planetary_eos_lab.core.validation_summary import (
 st.set_page_config(page_title="Planetary EOS Lab", layout="wide", page_icon="🪐")
 
 DEFAULT_PLANETPROFILE_EXPORT_DIR = REPO_ROOT / "outputs" / "planetprofile_export"
+HOME_MODE = "Home"
 LEGACY_COMPOSITION_BUILDER_MODE = "Build Composition"
 COMPOSITION_BUILDER_MODE = "Composition"
 PIPELINE_MODE = "Run Pipeline"
@@ -99,6 +112,7 @@ PIPELINE_MODEL_SELECTOR_KEYS = [
     "step5_plot_projects",
     "export_model_projects",
 ]
+RUNNING_COMMAND_JOB_KEY = "streamlit_running_command_job"
 
 PIPELINE_STEPS = [
     "1. Setup & Select Models",
@@ -113,8 +127,8 @@ COMPOSITION_BATCH_PAGE = "Batch Processing"
 COMPOSITION_THERMO_PAGE = "Thermodynamic Models"
 COMPOSITION_PAGES = [
     COMPOSITION_BUILD_PAGE,
-    COMPOSITION_CATALOG_PAGE,
     COMPOSITION_BATCH_PAGE,
+    COMPOSITION_CATALOG_PAGE,
     COMPOSITION_THERMO_PAGE,
 ]
 
@@ -495,6 +509,112 @@ def show_oxide_table(rows: list[dict[str, Any]], database: str = "stx21") -> Non
     )
 
 
+@dataclass(frozen=True)
+class GuiPerplexOptions:
+    sample_on_grid: bool = False
+    x_nodes: tuple[int, int] = (40, 300)
+    y_nodes: tuple[int, int] = (40, 300)
+    grid_levels: tuple[int, int] = (1, 4)
+    auto_refine: str = "auto"
+    final_resolution: tuple[str, str] = ("2.5e-4", "2.5e-4")
+
+
+GUI_DEFAULT_PERPLEX_OPTIONS = GuiPerplexOptions()
+
+
+def gui_boolean_option_from_config(value: object, *, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().upper()
+        if normalized in {"T", "TRUE", "Y", "YES", "1"}:
+            return True
+        if normalized in {"F", "FALSE", "N", "NO", "0"}:
+            return False
+    raise ValueError(f"{field_name} must be True or False; legacy T/F values are also accepted.")
+
+
+def gui_integer_pair_from_config(value: object, *, field_name: str, minimum: int = 2) -> tuple[int, int]:
+    if isinstance(value, str):
+        parts = value.replace(",", " ").split()
+    elif isinstance(value, (list, tuple)):
+        parts = list(value)
+    else:
+        raise ValueError(f"{field_name} must be a two-item list or string.")
+    if len(parts) != 2:
+        raise ValueError(f"{field_name} must contain exactly two values.")
+    try:
+        first, second = int(parts[0]), int(parts[1])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} values must be integers.") from exc
+    if first < minimum or second < minimum:
+        raise ValueError(f"{field_name} values must be at least {minimum}.")
+    if first > second:
+        raise ValueError(f"{field_name} minimum cannot exceed maximum.")
+    return first, second
+
+
+def gui_string_pair_from_config(value: object, *, field_name: str) -> tuple[str, str]:
+    if isinstance(value, str):
+        parts = value.replace(",", " ").split()
+    elif isinstance(value, (list, tuple)):
+        parts = [str(item) for item in value]
+    else:
+        raise ValueError(f"{field_name} must be a two-item list or string.")
+    if len(parts) != 2:
+        raise ValueError(f"{field_name} must contain exactly two values.")
+    return str(parts[0]), str(parts[1])
+
+
+def gui_perplex_options_from_config(
+    value: object,
+    fallback: GuiPerplexOptions = GUI_DEFAULT_PERPLEX_OPTIONS,
+) -> GuiPerplexOptions:
+    if value is None:
+        return fallback
+    if not isinstance(value, dict):
+        raise ValueError("perplex_options must be a JSON object.")
+
+    sample_on_grid = fallback.sample_on_grid
+    if "sample_on_grid" in value:
+        sample_on_grid = gui_boolean_option_from_config(value["sample_on_grid"], field_name="sample_on_grid")
+
+    return GuiPerplexOptions(
+        sample_on_grid=sample_on_grid,
+        x_nodes=gui_integer_pair_from_config(value.get("x_nodes", list(fallback.x_nodes)), field_name="x_nodes"),
+        y_nodes=gui_integer_pair_from_config(value.get("y_nodes", list(fallback.y_nodes)), field_name="y_nodes"),
+        grid_levels=gui_integer_pair_from_config(
+            value.get("grid_levels", list(fallback.grid_levels)),
+            field_name="grid_levels",
+            minimum=1,
+        ),
+        auto_refine=str(value.get("auto_refine", fallback.auto_refine)).strip() or fallback.auto_refine,
+        final_resolution=gui_string_pair_from_config(
+            value.get("final_resolution", list(fallback.final_resolution)),
+            field_name="final_resolution",
+        ),
+    )
+
+
+def model_perplex_options(model: dict[str, Any], config: dict[str, Any]) -> GuiPerplexOptions:
+    default_options = gui_perplex_options_from_config(config.get("perplex_options"))
+    return gui_perplex_options_from_config(
+        model.get("perplex_options"),
+        fallback=default_options,
+    )
+
+
+def perplex_options_config(options: GuiPerplexOptions) -> dict[str, Any]:
+    return {
+        "sample_on_grid": options.sample_on_grid,
+        "x_nodes": list(options.x_nodes),
+        "y_nodes": list(options.y_nodes),
+        "grid_levels": list(options.grid_levels),
+        "auto_refine": options.auto_refine,
+        "final_resolution": list(options.final_resolution),
+    }
+
+
 def show_model_database_configuration(
     config_path: Path,
     config: dict[str, Any],
@@ -505,9 +625,8 @@ def show_model_database_configuration(
     from planetary_eos_lab.core.config_io import save_config_json
     from planetary_eos_lab.core.database_utils import list_available_databases
 
-    st.subheader("Per-Model Thermodynamic Setup")
     st.caption(
-        "Configure database and BUILD template for each selected model. "
+        "Configure database, BUILD template, and Perple_X grid options for each selected model. "
         "Changes are saved to configs/models.json and persist across all pipeline steps and future sessions."
     )
 
@@ -521,10 +640,21 @@ def show_model_database_configuration(
 
         model_db = model.get("database", config.get("database", "stx21"))
         model_template = model.get("build_template_file", "")
-        has_explicit_config = "database" in model and ("build_template_file" in model or model_db in DEFAULT_BUILD_TEMPLATES)
-        config_status = "✅ Configured" if has_explicit_config else "⚠️ Using defaults"
+        current_options = model_perplex_options(model, config)
+        has_explicit_config = (
+            "database" in model
+            and ("build_template_file" in model or model_db in DEFAULT_BUILD_TEMPLATES)
+            and "perplex_options" in model
+        )
+        config_status = "Configured" if has_explicit_config else "Using defaults"
 
-        with st.expander(f"🔧 {project} - {config_status}", expanded=len(selected_projects) <= 2 and not has_explicit_config):
+        with st.container(border=True):
+            st.markdown(f"**{project}**")
+            st.caption(config_status)
+            feedback_key = f"model_setup_feedback_{project}"
+            saved_feedback = st.session_state.pop(feedback_key, None)
+            if saved_feedback:
+                st.success(str(saved_feedback))
 
             col1, col2 = st.columns([1, 1])
 
@@ -540,38 +670,192 @@ def show_model_database_configuration(
                 if new_db != model_db:
                     st.info(f"Database will change from `{model_db}` to `{new_db}`")
 
+            template_error = None
+            selected_template = ""
             with col2:
                 default_template = DEFAULT_BUILD_TEMPLATES.get(new_db, "")
-                current_template = model_template or default_template
+                bundled_templates = [
+                    template
+                    for template in available_build_templates()
+                    if not build_template_matches_database_default(template, new_db)
+                ]
+                template_options = []
+                if default_template:
+                    template_options.append(BUILD_TEMPLATE_DEFAULT_CHOICE)
+                template_options.extend(bundled_templates)
+                template_options.append(BUILD_TEMPLATE_CUSTOM_CHOICE)
 
-                new_template = st.text_input(
+                normalized_model_template = normalize_build_template_path(model_template)
+                using_database_default = model_uses_database_default_template(
+                    normalized_model_template,
+                    model_db,
+                    new_db,
+                )
+                if using_database_default and default_template:
+                    current_template_choice = BUILD_TEMPLATE_DEFAULT_CHOICE
+                elif normalized_model_template in bundled_templates:
+                    current_template_choice = normalized_model_template
+                else:
+                    current_template_choice = BUILD_TEMPLATE_CUSTOM_CHOICE
+                if current_template_choice not in template_options:
+                    current_template_choice = BUILD_TEMPLATE_CUSTOM_CHOICE
+
+                def template_choice_label(choice: str) -> str:
+                    if choice == BUILD_TEMPLATE_DEFAULT_CHOICE:
+                        return f"Use database default: {Path(default_template).name}"
+                    if choice == BUILD_TEMPLATE_CUSTOM_CHOICE:
+                        return "Custom template path..."
+                    return build_template_label(choice, selected_database=new_db)
+
+                new_template_choice = st.selectbox(
                     "BUILD Template",
-                    value=current_template,
-                    key=f"model_template_{project}",
-                    help=f"BUILD template file for {project}. Leave empty to use database default.",
-                    placeholder=default_template,
+                    options=template_options,
+                    index=template_options.index(current_template_choice),
+                    key=f"model_template_choice_{project}_{new_db}",
+                    help=(
+                        "Choose the BUILD input template for this model. "
+                        "Use database default keeps the template matched to the selected thermodynamic database."
+                    ),
+                    format_func=template_choice_label,
                 )
 
-                if new_template and new_template != model_template:
-                    st.info(f"Template will change to `{new_template}`")
+                if new_template_choice == BUILD_TEMPLATE_DEFAULT_CHOICE:
+                    selected_template = ""
+                    if default_template:
+                        st.caption(f"Matched to `{new_db}`: `{default_template}`")
+                    else:
+                        template_error = f"No default BUILD template is configured for `{new_db}`."
+                        st.error(template_error)
+                elif new_template_choice == BUILD_TEMPLATE_CUSTOM_CHOICE:
+                    custom_default = "" if using_database_default else normalized_model_template
+                    selected_template = normalize_build_template_path(
+                        st.text_input(
+                            "Custom BUILD template path",
+                            value=custom_default,
+                            key=f"model_template_custom_{project}_{new_db}",
+                            help="Use a repo-relative path or an absolute path to a custom BUILD input file.",
+                            placeholder=default_template,
+                        )
+                    )
+                    if not selected_template:
+                        template_error = "Custom BUILD template path cannot be empty."
+                        st.error(template_error)
+                else:
+                    selected_template = new_template_choice
+                    template_database = build_template_database(selected_template)
+                    if template_database and template_database != new_db:
+                        st.warning(
+                            f"`{selected_template}` is the default template for `{template_database}`, "
+                            f"not `{new_db}`."
+                        )
+                    else:
+                        st.caption(f"Explicit template override: `{selected_template}`")
 
-            if st.button(f"💾 Apply changes to {project}", key=f"save_model_config_{project}"):
+                previous_effective_template = "" if using_database_default else normalized_model_template
+                if selected_template != previous_effective_template:
+                    if selected_template:
+                        st.info(f"Template will change to `{selected_template}`")
+                    else:
+                        st.info(f"Template will follow the `{new_db}` database default.")
+
+            st.divider()
+            st.markdown("**Perple_X grid options**")
+            st.caption(
+                "`sample_on_grid` controls whether Perple_X samples exactly on the requested grid. "
+                "The final `perplex_option.dat` still uses Perple_X's required T/F syntax."
+            )
+            grid_col1, grid_col2, grid_col3 = st.columns([0.85, 1, 1])
+            with grid_col1:
+                sample_on_grid_value = st.radio(
+                    "sample_on_grid",
+                    options=["False", "True"],
+                    index=1 if current_options.sample_on_grid else 0,
+                    horizontal=True,
+                    key=f"model_sample_on_grid_{project}",
+                    help=(
+                        "False allows Perple_X adaptive refinement. "
+                        "True samples directly on the fixed grid you request."
+                    ),
+                )
+                if sample_on_grid_value == "False":
+                    st.caption("False: allow Perple_X adaptive refinement.")
+                else:
+                    st.caption("True: sample only on the requested grid.")
+            with grid_col2:
+                x_min = st.number_input(
+                    "x nodes min",
+                    min_value=2,
+                    value=int(current_options.x_nodes[0]),
+                    step=1,
+                    key=f"model_x_nodes_min_{project}",
+                )
+                x_max = st.number_input(
+                    "x nodes max",
+                    min_value=2,
+                    value=int(current_options.x_nodes[1]),
+                    step=1,
+                    key=f"model_x_nodes_max_{project}",
+                )
+            with grid_col3:
+                y_min = st.number_input(
+                    "y nodes min",
+                    min_value=2,
+                    value=int(current_options.y_nodes[0]),
+                    step=1,
+                    key=f"model_y_nodes_min_{project}",
+                )
+                y_max = st.number_input(
+                    "y nodes max",
+                    min_value=2,
+                    value=int(current_options.y_nodes[1]),
+                    step=1,
+                    key=f"model_y_nodes_max_{project}",
+                )
+
+            grid_error = None
+            if x_min > x_max:
+                grid_error = "x nodes min cannot be larger than x nodes max."
+            elif y_min > y_max:
+                grid_error = "y nodes min cannot be larger than y nodes max."
+            if grid_error:
+                st.error(grid_error)
+            else:
+                st.caption(f"Requested grid upper bound: {int(x_max) * int(y_max):,} points")
+                if sample_on_grid_value == "False":
+                    st.warning(
+                        "This is an adaptive Perple_X run. Even with 40 x 40 nodes, Perple_X may refine beyond "
+                        "that grid because `sample_on_grid` is False and grid levels remain adaptive. "
+                        "Choose True for a strict fixed-grid test."
+                    )
+                else:
+                    st.success("Strict fixed-grid test: Perple_X will write `sample_on_grid T` and `grid_levels 1 1`.")
+
+            new_perplex_options = GuiPerplexOptions(
+                sample_on_grid=sample_on_grid_value == "True",
+                x_nodes=(int(x_min), int(x_max)),
+                y_nodes=(int(y_min), int(y_max)),
+                grid_levels=(1, 1) if sample_on_grid_value == "True" else current_options.grid_levels,
+                auto_refine=current_options.auto_refine,
+                final_resolution=current_options.final_resolution,
+            )
+
+            has_setup_error = grid_error is not None or template_error is not None
+            if st.button(f"Apply setup to {project}", key=f"save_model_config_{project}", disabled=has_setup_error):
                 # Update the model in config
                 for i, m in enumerate(config["models"]):
                     if m.get("project") == project:
                         config["models"][i]["database"] = new_db
-                        if new_template:
-                            config["models"][i]["build_template_file"] = new_template
+                        if selected_template and not build_template_matches_database_default(selected_template, new_db):
+                            config["models"][i]["build_template_file"] = selected_template
                         elif "build_template_file" in config["models"][i]:
-                            # Remove if empty and reverting to default
-                            if not new_template.strip():
-                                del config["models"][i]["build_template_file"]
+                            del config["models"][i]["build_template_file"]
+                        config["models"][i]["perplex_options"] = perplex_options_config(new_perplex_options)
                         config_changed = True
                         break
 
                 if config_changed:
+                    st.session_state[feedback_key] = f"Setup saved for {project}."
                     save_config_json(config_path, config)
-                    st.success(f"✅ Updated {project} configuration")
                     st.rerun()
 
 
@@ -588,11 +872,16 @@ def show_selected_model_reviews(
         model = model_by_project(models, project)
         if model is None:
             continue
-        # Use model's own database if specified, otherwise fall back to global
+        model_has_database = bool(model.get("database"))
         model_database = model.get("database", database)
         with st.expander(f"{project}: composition review", expanded=len(selected_projects) == 1):
-            if model_database != database:
-                st.info(f"This model uses `{model_database}` database (global setting is `{database}`)")
+            if model_has_database:
+                st.caption(f"Thermodynamic model for this file: `{model_database}`")
+            else:
+                st.warning(
+                    f"No per-file thermodynamic model is saved for this file yet. "
+                    f"Set one in Thermodynamic Setup; using `{model_database}` only as a temporary review fallback."
+                )
             show_scientific_guardrail(model, database=model_database)
             if safe_component_composition(model) is not None:
                 st.metric("Input component total, wt%", f"{model_input_total(model):.2f}")
@@ -1049,60 +1338,314 @@ def set_workspace_mode(mode: str) -> None:
     st.session_state["workspace_mode"] = mode
 
 
-def run_streamlit_command(command: PipelineCommand, *, progress_label: str | None = None) -> bool:
-    label = progress_label or command.label
-    status = st.status(f"Running {label}", state="running", expanded=True)
-    with status:
-        st.caption("Command")
-        st.code(command.display, language="bash")
-        output_box = st.empty()
-    output_lines: list[str] = []
-    try:
-        process = subprocess.Popen(
-            command.command,
-            cwd=str(command.cwd),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
-        )
-    except OSError as exc:
-        status.update(label=f"Could not start: {label}", state="error", expanded=True)
-        with status:
-            st.error(f"Could not start command: {exc}")
-        return False
-
-    assert process.stdout is not None
-    for line in process.stdout:
-        output_lines.append(line)
-        output_box.code("".join(output_lines), language="text")
-    returncode = process.wait()
-    output_box.code("".join(output_lines), language="text")
-    if returncode == 0:
-        status.update(label=f"Complete: {label}", state="complete", expanded=False)
-        return True
-
-    status.update(label=f"Failed: {label}", state="error", expanded=True)
-    with status:
-        st.error(f"Command failed with return code {returncode}.")
-    return False
+def open_composition_page(index: int) -> None:
+    st.session_state["workspace_mode"] = COMPOSITION_BUILDER_MODE
+    set_composition_page(index)
 
 
-def run_streamlit_commands(commands: list[PipelineCommand]) -> None:
+def open_pipeline_step(index: int) -> None:
+    st.session_state["workspace_mode"] = PIPELINE_MODE
+    set_workflow_step(index)
+
+
+def command_progress_label(command: PipelineCommand, index: int, total: int) -> str:
+    remaining = total - index
+    suffix = f"{remaining} left" if remaining else "last run"
+    return f"{index}/{total} {command.label} ({suffix})"
+
+
+def append_command_log(log_path: Path, text: str) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as log_file:
+        log_file.write(text)
+
+
+def command_log_tail(log_path: Path, max_bytes: int = 24000) -> str:
+    if not log_path.exists():
+        return ""
+    with log_path.open("rb") as log_file:
+        log_file.seek(0, os.SEEK_END)
+        size = log_file.tell()
+        log_file.seek(max(0, size - max_bytes))
+        return log_file.read().decode("utf-8", errors="replace")
+
+
+def command_log_current_section(log_text: str) -> str:
+    sections = log_text.split("\n\n=== ")
+    return sections[-1] if sections else log_text
+
+
+def streamlit_job_is_running() -> bool:
+    job = st.session_state.get(RUNNING_COMMAND_JOB_KEY)
+    return isinstance(job, dict) and job.get("status") == "running"
+
+
+def launch_current_streamlit_command() -> None:
+    job = st.session_state.get(RUNNING_COMMAND_JOB_KEY)
+    if not isinstance(job, dict):
+        return
+    commands = job.get("commands", [])
+    index = int(job.get("index", 0))
+    if index >= len(commands):
+        job["status"] = "complete"
+        job["message"] = f"Finished {job.get('completed', 0)}/{len(commands)} run(s)."
+        return
+
+    command = commands[index]
     total = len(commands)
-    completed = 0
-    for index, command in enumerate(commands, start=1):
-        remaining = total - index
-        suffix = f"{remaining} left" if remaining else "last run"
-        ok = run_streamlit_command(
-            command,
-            progress_label=f"{index}/{total} {command.label} ({suffix})",
+    label = command_progress_label(command, index + 1, total)
+    log_path = Path(str(job["log_path"]))
+    append_command_log(
+        log_path,
+        f"\n\n=== {label} ===\n$ {command.display}\n",
+    )
+    try:
+        with log_path.open("a", encoding="utf-8") as log_file:
+            process = subprocess.Popen(
+                command.command,
+                cwd=str(command.cwd),
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                start_new_session=True,
+            )
+    except OSError as exc:
+        job["status"] = "failed"
+        job["message"] = f"Could not start {label}: {exc}"
+        append_command_log(log_path, f"Could not start command: {exc}\n")
+        return
+
+    job["process"] = process
+    job["current_label"] = label
+    job["message"] = f"Running {label}"
+
+
+def start_streamlit_command_job(commands: list[PipelineCommand], *, job_label: str) -> None:
+    if not commands:
+        return
+    if streamlit_job_is_running():
+        st.warning("A command is already running. Kill or finish it before starting another one.")
+        return
+
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+    log_path = REPO_ROOT / "outputs" / "streamlit_runs" / f"{job_label.lower().replace(' ', '_')}_{timestamp}.log"
+    job = {
+        "job_label": job_label,
+        "commands": commands,
+        "index": 0,
+        "completed": 0,
+        "status": "running",
+        "message": "",
+        "current_label": "",
+        "log_path": str(log_path),
+        "process": None,
+    }
+    st.session_state[RUNNING_COMMAND_JOB_KEY] = job
+    launch_current_streamlit_command()
+    st.rerun()
+
+
+def poll_streamlit_command_job() -> dict[str, Any] | None:
+    job = st.session_state.get(RUNNING_COMMAND_JOB_KEY)
+    if not isinstance(job, dict):
+        return None
+    if job.get("status") != "running":
+        return job
+
+    process = job.get("process")
+    if process is None:
+        launch_current_streamlit_command()
+        return job
+
+    returncode = process.poll()
+    if returncode is None:
+        return job
+
+    log_path = Path(str(job["log_path"]))
+    append_command_log(log_path, f"\nCommand exited with return code {returncode}.\n")
+    job["process"] = None
+    if returncode == 0:
+        job["completed"] = int(job.get("completed", 0)) + 1
+        job["index"] = int(job.get("index", 0)) + 1
+        commands = job.get("commands", [])
+        if int(job["index"]) >= len(commands):
+            job["status"] = "complete"
+            job["message"] = f"Finished {job['completed']}/{len(commands)} run(s)."
+        else:
+            launch_current_streamlit_command()
+        return job
+
+    job["status"] = "failed"
+    job["message"] = f"Stopped after {job.get('completed', 0)}/{len(job.get('commands', []))} completed run(s)."
+    return job
+
+
+def terminate_streamlit_command_job() -> None:
+    job = st.session_state.get(RUNNING_COMMAND_JOB_KEY)
+    if not isinstance(job, dict) or job.get("status") != "running":
+        return
+    process = job.get("process")
+    if process is not None and process.poll() is None:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except (AttributeError, ProcessLookupError, OSError):
+            process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (AttributeError, ProcessLookupError, OSError):
+                process.kill()
+            process.wait(timeout=5)
+
+    job["status"] = "killed"
+    job["message"] = "Run killed by user."
+    job["process"] = None
+    append_command_log(Path(str(job["log_path"])), "\nRun killed by user.\n")
+
+
+def command_stage_plan(command: PipelineCommand | None) -> list[tuple[str, tuple[str, ...]]]:
+    if command is None:
+        return [("Starting", ())]
+
+    label = command.label
+    command_text = " ".join(command.command)
+    if "run_full_pipeline.py" in command_text or label.startswith("Run pipeline:"):
+        stages = [
+            ("Generate composition files", ("Generating compositions",)),
+            ("Prepare Perple_X input", ("Running Perple_X pipeline", "perplex_option.dat")),
+            ("BUILD", ("Running BUILD for",)),
+            ("VERTEX", ("Running VERTEX for",)),
+            ("WERAMI", ("Running WERAMI for",)),
+            ("Validate output", ("STATUS: PASS", "STATUS: FAIL", "Validation skipped")),
+            ("Generate comparison plots", ("Generating comparison plots",)),
+        ]
+        if "--export-planetprofile" in command.command:
+            stages.append(("Export PlanetProfile tables", ("Exporting PlanetProfile tables", "Exported ")))
+        return stages
+
+    if "make_compositions.py" in command_text or label.startswith("Generate files:"):
+        return [("Generate composition files", ("Wrote ", "No inline compositions to generate"))]
+
+    if "export_planetprofile.py" in command_text or label.startswith("Export "):
+        return [("Export PlanetProfile tables", ("Exported ", "Wrote "))]
+
+    return [(label, ())]
+
+
+def detected_command_stage(
+    log_text: str,
+    stages: list[tuple[str, tuple[str, ...]]],
+) -> tuple[int, str]:
+    if not stages:
+        return 0, "Starting"
+
+    section = command_log_current_section(log_text)
+    detected_index = -1
+    for stage_index, (_stage_label, markers) in enumerate(stages):
+        if any(marker and marker in section for marker in markers):
+            detected_index = stage_index
+
+    if detected_index < 0:
+        return 0, "Starting command"
+    return detected_index, stages[detected_index][0]
+
+
+def current_job_command(job: dict[str, Any]) -> PipelineCommand | None:
+    commands = job.get("commands", [])
+    index = int(job.get("index", 0))
+    if not isinstance(commands, list) or not commands or index >= len(commands):
+        return None
+    command = commands[index]
+    return command if isinstance(command, PipelineCommand) else None
+
+
+def command_job_progress(job: dict[str, Any], log_text: str = "") -> tuple[float, str]:
+    commands = job.get("commands", [])
+    total = max(len(commands), 1)
+    completed = max(0, min(int(job.get("completed", 0)), total))
+    status = str(job.get("status", "running"))
+
+    if status == "complete":
+        return 1.0, f"Completed {completed}/{total} run(s)."
+
+    progress = completed / total
+    if status == "running":
+        current = min(max(int(job.get("index", 0)) + 1, 1), total)
+        command = current_job_command(job)
+        stages = command_stage_plan(command)
+        stage_index, stage_label = detected_command_stage(log_text, stages)
+        stage_count = max(len(stages), 1)
+        progress = (completed + ((stage_index + 1) / stage_count)) / total
+        project = command.label.split(":", 1)[1].strip() if command and ":" in command.label else ""
+        project_text = f"{project}: " if project else ""
+        return (
+            progress,
+            f"{project_text}{stage_label} (stage {stage_index + 1}/{stage_count}); "
+            f"file {current}/{total}, completed {completed}/{total}.",
         )
-        if not ok:
-            st.error(f"Stopped after {completed}/{total} completed run(s).")
-            return
-        completed += 1
-    st.success(f"Finished {completed}/{total} run(s).")
+
+    return progress, f"Stopped after {completed}/{total} completed run(s)."
+
+
+def show_indeterminate_running_bar() -> None:
+    st.markdown(
+        '<style>'
+        '@keyframes pelRunBar{0%{left:-42%;}100%{left:100%;}}'
+        '.pel-running-bar{position:relative;height:0.55rem;overflow:hidden;'
+        'border-radius:999px;background:rgba(31,119,180,0.14);'
+        'border:1px solid rgba(31,119,180,0.22);margin:0.25rem 0 0.65rem 0;}'
+        '.pel-running-bar::before{content:"";position:absolute;top:0;bottom:0;left:-42%;'
+        'width:42%;border-radius:999px;background:#1f77b4;'
+        'animation:pelRunBar 1.15s linear infinite;}'
+        '</style>'
+        '<div class="pel-running-bar" role="progressbar" aria-label="Run in progress"></div>',
+        unsafe_allow_html=True,
+    )
+
+
+def show_command_progress_bar(job: dict[str, Any], log_text: str = "") -> None:
+    status = str(job.get("status", "running"))
+    progress, progress_text = command_job_progress(job, log_text)
+    st.progress(progress, text=progress_text)
+    if status == "running":
+        show_indeterminate_running_bar()
+
+
+def show_streamlit_command_job() -> None:
+    job = poll_streamlit_command_job()
+    if not isinstance(job, dict):
+        return
+
+    status = str(job.get("status", "running"))
+    state = "running" if status == "running" else "complete" if status == "complete" else "error"
+    label = str(job.get("message") or job.get("current_label") or job.get("job_label", "Command"))
+    with st.status(label, state=state, expanded=status != "complete"):
+        log_path = Path(str(job["log_path"]))
+        log_text = command_log_tail(log_path)
+        show_command_progress_bar(job, log_text)
+        if status == "running":
+            if st.button("Kill run", type="secondary", key="kill_streamlit_running_job"):
+                terminate_streamlit_command_job()
+                st.rerun()
+        st.caption(f"Log file: `{log_path}`")
+        if log_text:
+            st.code(log_text, language="text")
+        else:
+            st.caption("Waiting for command output...")
+        if status != "running" and st.button("Clear run status", key="clear_streamlit_command_job"):
+            del st.session_state[RUNNING_COMMAND_JOB_KEY]
+            st.rerun()
+
+    if status == "running":
+        time.sleep(1)
+        st.rerun()
+
+
+def run_streamlit_commands(commands: list[PipelineCommand], *, job_label: str = "Pipeline run") -> None:
+    start_streamlit_command_job(commands, job_label=job_label)
 
 
 def editable_model_form(config_path: Path, config: dict[str, Any], model: dict[str, Any]) -> None:
@@ -1180,49 +1723,35 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
     st.subheader("Build Composition")
     st.caption(
         "Create or revise source compositions stored in `configs/models.json`. "
-        "After saving, the composition becomes a saved model that can be selected and run through the pipeline."
+        "The thermodynamic database controls which composition fields are shown here."
     )
 
-    st.subheader("Thermodynamic Setup")
-    st.caption(
-        "This choice controls which oxides are modeled by the default BUILD template and which are saved "
-        "as source-only metadata. Changing it changes the oxide fields and warnings shown below."
-    )
-    # Track database changes for warnings
-    previous_database = st.session_state.get("composition_builder_database")
+    st.markdown("**Thermodynamic database for composition fields**")
     database = show_database_selector(config, config_path)
-    st.session_state["composition_builder_database"] = database
 
-    if previous_database and previous_database != database:
-        st.warning(
-            f"⚠️ Database changed from `{previous_database}` to `{database}`. "
-            "Verify component/oxide values match the new database requirements. "
-            "Component values from the previous database may not be valid."
+    action_col, source_col = st.columns([1.35, 1])
+    with action_col:
+        builder_action = st.radio(
+            "Builder action",
+            options=["Create a new composition", "Copy a saved composition", "Edit a saved composition"],
+            horizontal=True,
         )
-
-    st.info(
-        f"Composition > Build is currently using `{database}`. The fields below follow the active "
-        "thermodynamic setup: oxide fields for oxide databases, component fields for volatile-bearing databases."
-    )
-    st.divider()
-
-    builder_action = st.radio(
-        "Builder action",
-        options=["Create a new composition", "Copy a saved composition", "Edit a saved composition"],
-        horizontal=True,
-    )
     existing_projects = {str(model.get("project", "")) for model in models if model.get("project")}
     creating_new = builder_action == "Create a new composition"
     copying_existing = builder_action == "Copy a saved composition"
     if creating_new:
         base_model = new_model_template("my_surface_proxy")
         choice_key = "new_composition"
+        with source_col:
+            input_basis = "component" if database_uses_component_inputs(database) else "oxide"
+            st.caption(f"Active setup: `{database}` with {input_basis} inputs.")
     elif copying_existing:
-        selected_source_project = st.selectbox(
-            "Saved composition to copy",
-            options=[str(model.get("project", "")) for model in models],
-            format_func=lambda project: model_label(next(model for model in models if model.get("project") == project)),
-        )
+        with source_col:
+            selected_source_project = st.selectbox(
+                "Saved composition to copy",
+                options=[str(model.get("project", "")) for model in models],
+                format_func=lambda project: model_label(next(model for model in models if model.get("project") == project)),
+            )
         source_model = deepcopy(next(model for model in models if model.get("project") == selected_source_project))
         copied_project = unique_project_name(selected_source_project, existing_projects)
         source_model["project"] = copied_project
@@ -1234,20 +1763,21 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
         ).strip()
         base_model = source_model
         choice_key = f"copy_{selected_source_project}"
-        st.info("This creates a new saved model. The original composition is not changed.")
+        with source_col:
+            st.caption("This creates a new saved model. The original is unchanged.")
     else:
-        selected_builder_project = st.selectbox(
-            "Saved composition to edit",
-            options=[str(model.get("project", "")) for model in models],
-            format_func=lambda project: model_label(next(model for model in models if model.get("project") == project)),
-        )
+        with source_col:
+            selected_builder_project = st.selectbox(
+                "Saved composition to edit",
+                options=[str(model.get("project", "")) for model in models],
+                format_func=lambda project: model_label(next(model for model in models if model.get("project") == project)),
+            )
         base_model = deepcopy(next(model for model in models if model.get("project") == selected_builder_project))
         choice_key = f"edit_{selected_builder_project}"
 
     reset_key = f"composition_editor_reset_{choice_key}"
     st.session_state.setdefault(reset_key, 0)
     widget_scope = f"{choice_key}_{st.session_state[reset_key]}"
-    save_slot = st.empty()
 
     edited = deepcopy(base_model)
     edited["database"] = database
@@ -1257,10 +1787,9 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
     def capped_default(value: float, max_value: float) -> float:
         return min(max(float(value), 0.0), max_value)
 
-    meta_col, oxide_col = st.columns([1, 1.25])
-    with meta_col:
-        st.subheader("Model")
-        st.caption("Only the project name and composition values are required for a new saved composition. The other metadata has safe defaults.")
+    st.markdown("**Model**")
+    project_col, description_col = st.columns([0.85, 1.4])
+    with project_col:
         edited["project"] = st.text_input(
             "Project name",
             value="" if creating_new else str(base_model.get("project", "")),
@@ -1268,6 +1797,7 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
             key=f"workspace_project_{widget_scope}",
             help="Required. This becomes the Perple_X project name and output folder name.",
         )
+    with description_col:
         edited["description"] = st.text_input(
             "Description",
             value="" if creating_new else str(base_model.get("description", "")),
@@ -1275,75 +1805,77 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
             key=f"workspace_description_{widget_scope}",
             help="Optional but useful for remembering what this composition represents.",
         )
-        if not edited["description"].strip():
-            edited["description"] = str(base_model.get("description", "User-defined composition"))
+    if not edited["description"].strip():
+        edited["description"] = str(base_model.get("description", "User-defined composition"))
 
-        with st.expander("Optional provenance and PlanetProfile metadata"):
-            filename_default = (
-                f"{edited['project'].strip()}_PerpleX.tab"
-                if edited["project"].strip()
-                else str(base_model.get("planetprofile_filename", "my_surface_proxy_PerpleX.tab"))
-            )
-            planetprofile_filename = st.text_input(
-                "PlanetProfile filename",
-                value="" if creating_new else str(base_model.get("planetprofile_filename", "")),
-                placeholder=filename_default,
-                key=f"workspace_pp_filename_{widget_scope}",
-            )
-            edited["planetprofile_filename"] = planetprofile_filename.strip() or filename_default
-            edited["scientific_status"] = (
-                st.text_input(
-                    "Scientific status",
-                    value="" if creating_new else str(base_model.get("scientific_status", "")),
-                    placeholder=str(base_model.get("scientific_status", "")),
-                    key=f"workspace_status_{widget_scope}",
-                ).strip()
-                or str(base_model.get("scientific_status", "surface_proxy_smoke_test"))
-            )
-            edited["model_scope"] = (
-                st.text_input(
-                    "Model scope",
-                    value="" if creating_new else str(base_model.get("model_scope", "")),
-                    placeholder=str(base_model.get("model_scope", "")),
-                    key=f"workspace_scope_{widget_scope}",
-                ).strip()
-                or str(base_model.get("model_scope", "surface_terrane_proxy"))
-            )
-            edited["planetprofile_readiness"] = (
-                st.text_input(
-                    "PlanetProfile readiness",
-                    value="" if creating_new else str(base_model.get("planetprofile_readiness", "")),
-                    placeholder=str(base_model.get("planetprofile_readiness", "")),
-                    key=f"workspace_readiness_{widget_scope}",
-                ).strip()
-                or str(base_model.get("planetprofile_readiness", "mechanically_exportable_not_scientifically_final"))
-            )
-            edited["composition_interpretation"] = (
-                st.text_area(
-                    "Composition interpretation",
-                    value="" if creating_new else str(base_model.get("composition_interpretation", "")),
-                    placeholder=str(base_model.get("composition_interpretation", "")),
-                    key=f"workspace_interpretation_{widget_scope}",
-                ).strip()
-                or str(base_model.get("composition_interpretation", "User-defined composition."))
-            )
-            edited["source_note"] = (
-                st.text_area(
-                    "Source note",
-                    value="" if creating_new else str(base_model.get("source_note", "")),
-                    placeholder=str(base_model.get("source_note", "")),
-                    key=f"workspace_source_{widget_scope}",
-                ).strip()
-                or str(base_model.get("source_note", "Entered through the Streamlit GUI."))
-            )
-            edited["literature_proxy"] = st.checkbox(
-                "Based on literature values",
-                value=bool(base_model.get("literature_proxy", False)),
-                key=f"workspace_literature_values_{widget_scope}",
-                help="Use this when the composition comes from a publication or tabulated literature average.",
-            )
+    with st.expander("Optional metadata"):
+        filename_default = (
+            f"{edited['project'].strip()}_PerpleX.tab"
+            if edited["project"].strip()
+            else str(base_model.get("planetprofile_filename", "my_surface_proxy_PerpleX.tab"))
+        )
+        planetprofile_filename = st.text_input(
+            "PlanetProfile filename",
+            value="" if creating_new else str(base_model.get("planetprofile_filename", "")),
+            placeholder=filename_default,
+            key=f"workspace_pp_filename_{widget_scope}",
+        )
+        edited["planetprofile_filename"] = planetprofile_filename.strip() or filename_default
+        edited["scientific_status"] = (
+            st.text_input(
+                "Scientific status",
+                value="" if creating_new else str(base_model.get("scientific_status", "")),
+                placeholder=str(base_model.get("scientific_status", "")),
+                key=f"workspace_status_{widget_scope}",
+            ).strip()
+            or str(base_model.get("scientific_status", "surface_proxy_smoke_test"))
+        )
+        edited["model_scope"] = (
+            st.text_input(
+                "Model scope",
+                value="" if creating_new else str(base_model.get("model_scope", "")),
+                placeholder=str(base_model.get("model_scope", "")),
+                key=f"workspace_scope_{widget_scope}",
+            ).strip()
+            or str(base_model.get("model_scope", "surface_terrane_proxy"))
+        )
+        edited["planetprofile_readiness"] = (
+            st.text_input(
+                "PlanetProfile readiness",
+                value="" if creating_new else str(base_model.get("planetprofile_readiness", "")),
+                placeholder=str(base_model.get("planetprofile_readiness", "")),
+                key=f"workspace_readiness_{widget_scope}",
+            ).strip()
+            or str(base_model.get("planetprofile_readiness", "mechanically_exportable_not_scientifically_final"))
+        )
+        edited["composition_interpretation"] = (
+            st.text_area(
+                "Composition interpretation",
+                value="" if creating_new else str(base_model.get("composition_interpretation", "")),
+                placeholder=str(base_model.get("composition_interpretation", "")),
+                key=f"workspace_interpretation_{widget_scope}",
+            ).strip()
+            or str(base_model.get("composition_interpretation", "User-defined composition."))
+        )
+        edited["source_note"] = (
+            st.text_area(
+                "Source note",
+                value="" if creating_new else str(base_model.get("source_note", "")),
+                placeholder=str(base_model.get("source_note", "")),
+                key=f"workspace_source_{widget_scope}",
+            ).strip()
+            or str(base_model.get("source_note", "Entered through the Streamlit GUI."))
+        )
+        edited["literature_proxy"] = st.checkbox(
+            "Based on literature values",
+            value=bool(base_model.get("literature_proxy", False)),
+            key=f"workspace_literature_values_{widget_scope}",
+            help="Use this when the composition comes from a publication or tabulated literature average.",
+        )
 
-    with oxide_col:
+    save_status_slot = st.empty()
+
+    with st.container():
         if component_mode:
             base_components = safe_component_composition(base_model) or {}
             edited.pop("oxides_wt_percent", None)
@@ -1351,13 +1883,12 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
             edited.pop("composition_raw", None)
             edited["components_wt_percent"] = {}
             build_components = get_database_components(database)
-            st.subheader(f"Modeled Components for {database}, wt%")
-            st.caption(f"These Perple_X components are passed to the active {database} BUILD template.")
+            st.markdown(f"**Modeled Components for {database}, wt%**")
             st.caption("Total input is capped at 100 wt%. Lower earlier values to free room for later fields.")
-            component_columns = st.columns(3)
+            component_columns = st.columns(4)
             entered_total = 0.0
             for index, (_, component) in enumerate(build_components):
-                with component_columns[index % 3]:
+                with component_columns[index % 4]:
                     max_value = max(0.0, total_limit - entered_total)
                     edited["components_wt_percent"][component] = st.number_input(
                         component,
@@ -1369,17 +1900,6 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
                         key=f"workspace_component_{widget_scope}_{component}",
                     )
                     entered_total += float(edited["components_wt_percent"][component])
-            # Show BUILD command preview
-            st.caption("BUILD command preview")
-            component_summary = " ".join(component for _, component in build_components)
-            provided_count = sum(1 for _, comp in build_components if edited["components_wt_percent"].get(comp, 0.0) > 0)
-            total_count = len(build_components)
-            if provided_count == total_count:
-                st.success(f"✓ All {total_count} required components provided")
-            else:
-                st.warning(f"⚠️ {provided_count}/{total_count} components provided (zero values will be normalized)")
-            st.code(f"BUILD will receive: {component_summary}", language="text")
-
             with st.expander("Component names"):
                 st.write(
                     "These names must match the active Perple_X datafile. For element-style DEW databases, "
@@ -1396,13 +1916,12 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
             source_only_oxides = get_source_only_oxides(database)
             modeled_oxides = [oxide for oxide in OXIDE_ORDER if oxide in active_oxides]
 
-            st.subheader(f"Modeled Oxides for {database}, wt%")
-            st.caption(f"These oxides are passed to the active {database} BUILD template.")
+            st.markdown(f"**Modeled Oxides for {database}, wt%**")
             st.caption("Total input is capped at 100 wt%. Lower earlier values to free room for later fields.")
-            modeled_columns = st.columns(3)
+            modeled_columns = st.columns(4)
             entered_total = 0.0
             for index, oxide in enumerate(modeled_oxides):
-                with modeled_columns[index % 3]:
+                with modeled_columns[index % 4]:
                     max_value = max(0.0, total_limit - entered_total)
                     edited["oxides_wt_percent"][oxide] = st.number_input(
                         oxide,
@@ -1414,11 +1933,11 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
                         key=f"workspace_oxide_{widget_scope}_{oxide}",
                     )
                     entered_total += float(edited["oxides_wt_percent"][oxide])
-            st.subheader(f"Source-Only Oxides for {database}, wt%")
-            st.caption(f"Saved in the composition record, plots, and warnings, but not passed to {database} BUILD.")
-            source_columns = st.columns(3)
+            st.markdown(f"**Source-Only Oxides for {database}, wt%**")
+            st.caption("Saved in the record and plots, but not passed to this BUILD template.")
+            source_columns = st.columns(4)
             for index, oxide in enumerate(source_only_oxides):
-                with source_columns[index % 3]:
+                with source_columns[index % 4]:
                     max_value = max(0.0, total_limit - entered_total)
                     edited["oxides_wt_percent"][oxide] = st.number_input(
                         oxide,
@@ -1430,26 +1949,12 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
                         key=f"workspace_source_oxide_{widget_scope}_{oxide}",
                     )
                     entered_total += float(edited["oxides_wt_percent"][oxide])
-            # Show BUILD command preview
-            st.caption("BUILD command preview")
-            oxide_summary = " ".join(modeled_oxides)
-            provided_count = sum(1 for oxide in modeled_oxides if edited["oxides_wt_percent"].get(oxide, 0.0) > 0)
-            total_count = len(modeled_oxides)
-            if provided_count == total_count:
-                st.success(f"✓ All {total_count} modeled oxides provided")
-            elif provided_count > 0:
-                st.info(f"{provided_count}/{total_count} modeled oxides provided (zero values will be normalized)")
-            else:
-                st.warning(f"⚠️ No modeled oxides provided yet")
-            st.code(f"BUILD will receive: {oxide_summary}", language="text")
-
             if source_only_oxides:
-                st.info(
-                    f"The {database} database models "
-                    + ", ".join(modeled_oxides)
-                    + f". {', '.join(source_only_oxides)} are source-only and require a different database to model."
+                st.caption(
+                    f"{database} models {', '.join(modeled_oxides)}. "
+                    f"{', '.join(source_only_oxides)} are source-only."
                 )
-            with st.expander("Why can't I add other elements here?"):
+            with st.expander("Why other elements are not shown"):
                 st.write(
                     "The GUI is tied to the current Perple_X BUILD component list and composition schema. "
                     "Adding a new element is not just adding another text box: the BUILD template, active "
@@ -1461,27 +1966,27 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
     source_project = "" if creating_new or copying_existing else str(base_model.get("project", ""))
     edited_project = str(edited.get("project", "")).strip()
     duplicate_project = edited_project in existing_projects and edited_project != source_project
-    if validation.errors:
-        st.error("Cannot save yet: " + "; ".join(validation.errors))
+    cannot_save_messages = list(validation.errors)
     if duplicate_project:
-        st.error(f"Cannot save yet: another saved model already uses project `{edited_project}`.")
+        cannot_save_messages.append(f"another saved model already uses project `{edited_project}`")
     for warning in validation.warnings:
         st.warning(warning)
 
-    with save_slot.container():
-        st.subheader("Save")
-        if creating_new:
-            st.caption("Save this as a new composition before running the pipeline.")
-        elif copying_existing:
-            st.caption("Save this copy as a new composition. The original is unchanged.")
-        else:
-            st.caption("Save changes to the existing composition, or undo edits since opening it.")
-        save_col, undo_col = st.columns([1, 1])
+    with save_status_slot.container():
+        try:
+            current_total = model_input_total(edited)
+        except (TypeError, ValueError):
+            current_total = 0.0
+        remaining_total = max(0.0, total_limit - current_total)
+        total_col1, total_col2, total_col3, save_col, undo_col = st.columns([0.9, 0.9, 0.8, 1.1, 0.8])
+        total_col1.metric("Current input total", f"{current_total:.2f} wt%")
+        total_col2.metric("Remaining to 100 wt%", f"{remaining_total:.2f}")
+        total_col3.metric("Input basis", "components" if component_mode else "oxides")
         with save_col:
             save_clicked = st.button(
-                "Save composition to config",
+                "Save composition",
                 type="primary",
-                disabled=not validation.ok or duplicate_project,
+                disabled=bool(cannot_save_messages),
                 width="stretch",
                 key=f"save_composition_{widget_scope}",
             )
@@ -1492,6 +1997,8 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
                 width="stretch",
                 key=f"undo_composition_{widget_scope}",
             )
+        if cannot_save_messages:
+            st.error("Cannot save: " + "; ".join(cannot_save_messages))
         if undo_clicked:
             st.session_state[reset_key] += 1
             st.rerun()
@@ -1504,7 +2011,6 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
     preview_col, guardrail_col = st.columns([1.3, 1])
     with preview_col:
         if component_mode:
-            st.metric("Input component total, wt%", f"{model_input_total(edited):.2f}")
             rows = component_table_rows(edited, database) if validation.ok else []
             if rows:
                 st.caption(
@@ -1522,7 +2028,6 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
                     use_container_width=True,
                 )
         else:
-            st.metric("Input oxide total, wt%", f"{raw_total(edited):.2f}")
             rows = oxide_table_rows(edited, database=database) if validation.ok else []
             if rows:
                 st.caption(
@@ -1550,9 +2055,6 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
                         f"Omitted from {database} BUILD: "
                         + ", ".join(f"{item['oxide']}={item['normalized_wt_percent']:.2f} wt%" for item in omitted)
                     )
-        st.caption(f"Active {database} BUILD components")
-        st.code(active_component_text(database), language="text")
-
     return edited if validation.ok else base_model
 
 
@@ -1575,13 +2077,18 @@ def show_composition_page(
         st.caption(
             "Review existing saved compositions, including their thermodynamic model, basis, totals, and metadata."
         )
+
+        st.markdown("**Catalog actions**")
+        action_col1, action_col2 = st.columns([1, 1])
+        with action_col1:
+            with st.expander("Import or export compositions", expanded=True):
+                show_import_export_panel(config_path, config)
+        with action_col2:
+            with st.expander("Delete saved composition(s)", expanded=True):
+                delete_model_panel(config_path, config, models)
+
+        st.divider()
         show_model_catalog(models, database=current_database)
-
-        with st.expander("Import/Export Compositions"):
-            show_import_export_panel(config_path, config)
-
-        with st.expander("Delete saved composition(s)"):
-            delete_model_panel(config_path, config, models)
         return
 
     if page == COMPOSITION_BATCH_PAGE:
@@ -1594,6 +2101,79 @@ def show_composition_page(
 
     st.warning(f"Unknown composition page `{page}`. Showing Build instead.")
     composition_workspace(config_path, config, models)
+
+
+def show_sidebar_local_configuration(config_path: Path, config: dict[str, Any], workspace_mode: str) -> None:
+    perplex_dir = st.text_input(
+        "Perple_X directory",
+        value=str(config.get("perplex_dir", "")),
+        key="sidebar_perplex_dir",
+        help="Folder containing BUILD, VERTEX, WERAMI executables and Perple_X datafiles.",
+    )
+    st.caption("Saved as `perplex_dir` in the active config.")
+    if st.button("Save Perple_X path", key="save_sidebar_perplex_dir", width="stretch"):
+        write_config(config_path, update_perplex_dir(config, perplex_dir))
+
+
+def show_home_page(config_path: Path, config: dict[str, Any], models: list[dict[str, Any]]) -> None:
+    st.header("Home")
+    st.caption("Start from the task you want to do next.")
+
+    perplex_dir = str(config.get("perplex_dir", "")).strip()
+    metric_col1, metric_col2, metric_col3 = st.columns(3)
+    metric_col1.metric("Saved compositions", len(models))
+    metric_col2.metric("Perple_X path", "Set" if perplex_dir else "Missing")
+    metric_col3.metric("Config", config_path.name)
+
+    if not perplex_dir:
+        st.warning("Set the Perple_X directory in the left Local configuration panel before running Perple_X.")
+
+    build_col, run_col, compare_col = st.columns(3)
+    with build_col:
+        with st.container(border=True):
+            st.subheader("Composition")
+            st.write("Build, copy, batch-generate, import, or review saved source compositions.")
+            st.button(
+                "Build composition",
+                type="primary",
+                width="stretch",
+                on_click=open_composition_page,
+                args=(COMPOSITION_PAGES.index(COMPOSITION_BUILD_PAGE),),
+            )
+            st.button(
+                "Open catalog",
+                width="stretch",
+                on_click=open_composition_page,
+                args=(COMPOSITION_PAGES.index(COMPOSITION_CATALOG_PAGE),),
+            )
+    with run_col:
+        with st.container(border=True):
+            st.subheader("Pipeline")
+            st.write("Configure thermodynamic setup per file, generate inputs, run Perple_X, and validate outputs.")
+            st.button(
+                "Setup selected models",
+                type="primary",
+                width="stretch",
+                on_click=open_pipeline_step,
+                args=(0,),
+            )
+            st.button(
+                "Run Perple_X",
+                width="stretch",
+                on_click=open_pipeline_step,
+                args=(2,),
+            )
+    with compare_col:
+        with st.container(border=True):
+            st.subheader("Compare")
+            st.write("Inspect model compositions, density/velocity plots, and generated output ranges.")
+            st.button(
+                "Compare models",
+                type="primary",
+                width="stretch",
+                on_click=set_workspace_mode,
+                args=(COMPARISON_MODE,),
+            )
 
 
 def show_selected_comparison_plots(config_path: Path, models: list[dict[str, Any]]) -> None:
@@ -1830,7 +2410,7 @@ def main() -> None:
     )
 
     if "workspace_mode" not in st.session_state:
-        st.session_state["workspace_mode"] = PIPELINE_MODE
+        st.session_state["workspace_mode"] = HOME_MODE
     if st.session_state.get("workspace_mode") == LEGACY_COMPOSITION_BUILDER_MODE:
         st.session_state["workspace_mode"] = COMPOSITION_BUILDER_MODE
     if "composition_page_index" not in st.session_state:
@@ -1848,7 +2428,7 @@ def main() -> None:
     with st.sidebar:
         st.header("Workspace")
         st.caption("Main task")
-        for mode in [COMPOSITION_BUILDER_MODE, PIPELINE_MODE, COMPARISON_MODE]:
+        for mode in [HOME_MODE, COMPOSITION_BUILDER_MODE, PIPELINE_MODE, COMPARISON_MODE]:
             st.button(
                 mode,
                 key=f"workspace_mode_{mode}",
@@ -1922,6 +2502,8 @@ def main() -> None:
                     width="stretch",
                 )
             step = str(st.session_state.get("workflow_step_choice", PIPELINE_STEPS[0]))
+        elif workspace_mode == HOME_MODE:
+            st.caption("Choose a task from the home dashboard.")
         else:
             st.caption("Select saved models, compare outputs, or switch to Composition to build inputs.")
         st.divider()
@@ -1936,7 +2518,7 @@ def main() -> None:
     config_path = resolve_path(config_input, REPO_ROOT)
 
     if not config_path.exists():
-        st.header("Create Local Config" if workspace_mode == COMPOSITION_BUILDER_MODE else "Step 1. Setup & Select Models")
+        st.header("Create Local Config" if workspace_mode in {HOME_MODE, COMPOSITION_BUILDER_MODE} else "Step 1. Setup & Select Models")
         st.write(f"Current working directory: `{Path.cwd()}`")
         st.write(f"Repository root: `{REPO_ROOT}`")
         st.write(f"Resolved config path: `{config_path}`")
@@ -1960,10 +2542,16 @@ def main() -> None:
     available_projects = project_options(models)
     for selector_key in PIPELINE_MODEL_SELECTOR_KEYS:
         seed_model_selector_state(selector_key, available_projects)
+    with st.sidebar:
+        show_sidebar_local_configuration(config_path, config, workspace_mode)
     if not st.session_state.get("planetprofile_export_dir"):
         st.session_state["planetprofile_export_dir"] = str(DEFAULT_PLANETPROFILE_EXPORT_DIR)
 
     export_dir = str(st.session_state.get("planetprofile_export_dir", REPO_ROOT / "outputs" / "planetprofile_export"))
+
+    if workspace_mode == HOME_MODE:
+        show_home_page(config_path, config, models)
+        return
 
     if workspace_mode == COMPOSITION_BUILDER_MODE:
         show_composition_page(config_path, config, models, current_database, str(composition_page))
@@ -1975,20 +2563,6 @@ def main() -> None:
 
     if step == "1. Setup & Select Models":
         st.header("Step 1. Setup & Select Models")
-        st.write(f"Current working directory: `{Path.cwd()}`")
-        st.write(f"Repository root: `{REPO_ROOT}`")
-        st.write(f"Resolved config path: `{config_path}`")
-
-        st.subheader("Configuration")
-        st.caption("Perple_X Installation")
-        perplex_dir = st.text_input("Perple_X directory", value=str(config.get("perplex_dir", "")))
-        st.caption(
-            "Path to find BUILD, VERTEX, WERAMI executables and datafiles. "
-            "Save when you change machines or Perple_X locations."
-        )
-        if st.button("Save Perple_X path to config"):
-            write_config(config_path, update_perplex_dir(config, perplex_dir))
-
         st.subheader("Models for this pipeline session")
         selected_projects = st.multiselect(
             "Saved models to review",
@@ -2001,17 +2575,16 @@ def main() -> None:
         )
         if selected_projects:
             st.success(f"Selected {len(selected_projects)} model(s) for review.")
-            show_model_database_configuration(config_path, config, models, selected_projects)
-        show_selected_model_reviews(models, selected_projects, database=current_database)
+        with st.container(border=True):
+            st.subheader("Thermodynamic Setup")
+            if selected_projects:
+                show_model_database_configuration(config_path, config, models, selected_projects)
+            else:
+                st.info("Select one or more saved models to configure database, BUILD template, and grid options.")
 
-        st.subheader("Saved model catalog")
-        st.caption(
-            "Use this table to compare saved compositions before generating files. "
-            "The selected marker only reflects the models selected above."
-        )
-        show_model_catalog(models, selected_projects, database=current_database)
-        with st.expander("Delete saved model(s)"):
-            delete_model_panel(config_path, config, models)
+        with st.container(border=True):
+            st.subheader("Composition Review")
+            show_selected_model_reviews(models, selected_projects, database=current_database)
 
     elif step == "2. Generate Files":
         st.header("Step 2. Generate Files")
@@ -2028,9 +2601,11 @@ def main() -> None:
         st.caption(
             "Generated composition JSON, bulk-value, and summary files are written under `compositions/`."
         )
+        show_streamlit_command_job()
+        command_running = streamlit_job_is_running()
         if not projects_to_generate:
             st.info("Select at least one saved model to generate.")
-        if st.button("Generate selected file(s)", disabled=not projects_to_generate):
+        if st.button("Generate selected file(s)", disabled=not projects_to_generate or command_running):
             commands = [
                 relabel_command(
                     generate_compositions_command(config_path, project),
@@ -2038,7 +2613,7 @@ def main() -> None:
                 )
                 for project in projects_to_generate
             ]
-            run_streamlit_commands(commands)
+            run_streamlit_commands(commands, job_label="Generate files")
 
     elif step == "3. Run Perple_X":
         st.header("Step 3. Run Perple_X")
@@ -2059,9 +2634,11 @@ def main() -> None:
         )
         if export_after_run:
             st.caption(f"Export directory: `{export_dir}`")
+        show_streamlit_command_job()
+        command_running = streamlit_job_is_running()
         if not projects_to_run:
             st.info("Select at least one saved model to run.")
-        if st.button("Run selected model(s)", disabled=not projects_to_run):
+        if st.button("Run selected model(s)", disabled=not projects_to_run or command_running):
             commands = [
                 relabel_command(
                     full_pipeline_command(
@@ -2074,7 +2651,7 @@ def main() -> None:
                 )
                 for project in projects_to_run
             ]
-            run_streamlit_commands(commands)
+            run_streamlit_commands(commands, job_label="Run Perple_X")
 
     elif step == "4. Validate / Export":
         st.header("Step 4. Validate / Export")

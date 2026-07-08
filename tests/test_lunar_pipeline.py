@@ -691,6 +691,77 @@ def test_hp633_config_uses_matching_default_template(tmp_path: Path) -> None:
     assert loaded.models[0].werami_input_sequence == run_perplex.default_werami_sequence_for_database("hp633")
 
 
+def test_per_model_perplex_options_are_loaded_and_written(tmp_path: Path) -> None:
+    perplex_dir = make_fake_perplex(tmp_path)
+    config = {
+        "perplex_dir": str(perplex_dir),
+        "perplex_options": {
+            "sample_on_grid": "T",
+            "x_nodes": [10, 50],
+            "y_nodes": [20, 60],
+        },
+        "models": [
+            {
+                "project": PROJECT,
+                "composition_file": str(tmp_path / "composition.json"),
+                "output_dir": str(tmp_path / "outputs" / PROJECT),
+                "perplex_options": {
+                    "sample_on_grid": "F",
+                    "x_nodes": [40, 300],
+                    "y_nodes": [40, 300],
+                },
+            }
+        ],
+    }
+    config_path = tmp_path / "models.json"
+    config_path.write_text(json.dumps(config) + "\n")
+
+    loaded = run_perplex.load_config(config_path)
+    options = loaded.models[0].perplex_options
+
+    assert options.sample_on_grid is False
+    assert options.x_nodes == (40, 300)
+    assert options.y_nodes == (40, 300)
+    text = run_perplex.render_perplex_option_text(options)
+    assert "sample_on_grid F" in text
+    assert "x_nodes 40 300" in text
+    assert "y_nodes 40 300" in text
+    assert "grid_levels 1 4" in text
+
+
+def test_top_level_perplex_options_apply_to_models(tmp_path: Path) -> None:
+    perplex_dir = make_fake_perplex(tmp_path)
+    config = {
+        "perplex_dir": str(perplex_dir),
+        "perplex_options": {
+            "sample_on_grid": True,
+            "x_nodes": "12 34",
+            "y_nodes": "56 78",
+        },
+        "models": [
+            {
+                "project": PROJECT,
+                "composition_file": str(tmp_path / "composition.json"),
+                "output_dir": str(tmp_path / "outputs" / PROJECT),
+            }
+        ],
+    }
+    config_path = tmp_path / "models.json"
+    config_path.write_text(json.dumps(config) + "\n")
+
+    loaded = run_perplex.load_config(config_path)
+    options = loaded.models[0].perplex_options
+
+    assert options.sample_on_grid is True
+    assert options.x_nodes == (12, 34)
+    assert options.y_nodes == (56, 78)
+    text = run_perplex.render_perplex_option_text(options)
+    assert "sample_on_grid T" in text
+    assert "grid_levels 1 1" in text
+    assert "x_nodes 12 34" in text
+    assert "y_nodes 56 78" in text
+
+
 def test_render_hp633_build_input_uses_hp_bulk_values(tmp_path: Path) -> None:
     composition_file = tmp_path / "composition.json"
     composition_file.write_text(
@@ -827,6 +898,15 @@ def test_phase_diagram_simplified_assemblages_group_minor_phase_changes() -> Non
     assert "Major framework" in hover_grid[0][0]
     assert "Full Perple_X assemblage" not in hover_grid[0][0]
     assert phase_diagram.assemblage_field_label(("Cpx(HP)", "Gt(HP)")) == "Cpx + Gt"
+    color_entries = phase_diagram.assemblage_color_key_entries(
+        assemblage_grid,
+        phase_diagram.MAJOR_FRAMEWORK_ASSEMBLAGE_OPTION,
+    )
+    assert color_entries[0][1] == "Cpx + Gt"
+    color_key_html = phase_diagram.assemblage_color_key_html(color_entries)
+    assert color_key_html.startswith("<div")
+    assert "background-color:" in color_key_html
+    assert "border-left:" in color_key_html
     caption_text = phase_diagram.assemblage_caption_text(
         assemblage_grid,
         phase_diagram.MAJOR_FRAMEWORK_ASSEMBLAGE_OPTION,

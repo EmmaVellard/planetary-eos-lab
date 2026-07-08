@@ -23,6 +23,97 @@ DEFAULT_BUILD_TEMPLATES = {
     "dew13_hydrous": "build_inputs/icy_dew13_hydrous_template.build.in",
     "dew17_comet": "build_inputs/icy_dew17_comet_template.build.in",
 }
+REPO_ROOT = Path(__file__).resolve().parents[2]
+BUILD_TEMPLATE_DEFAULT_CHOICE = "__database_default__"
+BUILD_TEMPLATE_CUSTOM_CHOICE = "__custom_build_template__"
+
+
+def normalize_build_template_path(path: str | Path, repo_root: Path = REPO_ROOT) -> str:
+    """Return a stable repo-relative template path when possible."""
+    raw_path = str(path).strip()
+    if not raw_path:
+        return ""
+
+    template_path = Path(raw_path)
+    if template_path.is_absolute():
+        try:
+            return template_path.resolve().relative_to(repo_root.resolve()).as_posix()
+        except ValueError:
+            return template_path.as_posix()
+    return raw_path.replace("\\", "/")
+
+
+def build_template_paths_match(left: str | Path, right: str | Path, repo_root: Path = REPO_ROOT) -> bool:
+    left_normalized = normalize_build_template_path(left, repo_root)
+    right_normalized = normalize_build_template_path(right, repo_root)
+    if left_normalized == right_normalized:
+        return True
+    if not left_normalized or not right_normalized:
+        return False
+
+    left_path = Path(left_normalized)
+    right_path = Path(right_normalized)
+    if not left_path.is_absolute():
+        left_path = repo_root / left_path
+    if not right_path.is_absolute():
+        right_path = repo_root / right_path
+    return left_path.resolve() == right_path.resolve()
+
+
+def build_template_database(template_path: str | Path) -> str | None:
+    for database, default_template in DEFAULT_BUILD_TEMPLATES.items():
+        if build_template_paths_match(template_path, default_template):
+            return database
+    return None
+
+
+def build_template_matches_database_default(template_path: str | Path, database: str) -> bool:
+    default_template = DEFAULT_BUILD_TEMPLATES.get(database)
+    return bool(default_template and build_template_paths_match(template_path, default_template))
+
+
+def available_build_templates(repo_root: Path = REPO_ROOT) -> list[str]:
+    """Return bundled BUILD templates with database defaults first."""
+    template_paths: list[str] = []
+
+    def add_template(path: str | Path) -> None:
+        normalized = normalize_build_template_path(path, repo_root)
+        if normalized and normalized not in template_paths:
+            template_paths.append(normalized)
+
+    for template_path in DEFAULT_BUILD_TEMPLATES.values():
+        add_template(template_path)
+
+    build_input_dir = repo_root / "build_inputs"
+    if build_input_dir.exists():
+        for template_path in sorted(build_input_dir.glob("*.build.in")):
+            add_template(template_path)
+
+    return template_paths
+
+
+def build_template_label(template_path: str | Path, selected_database: str | None = None) -> str:
+    normalized = normalize_build_template_path(template_path)
+    database = build_template_database(normalized)
+    if database and database == selected_database:
+        return f"{Path(normalized).name} - default for {database}"
+    if database:
+        return f"{Path(normalized).name} - default for {database}"
+    return f"{Path(normalized).name} - bundled template"
+
+
+def model_uses_database_default_template(
+    model_template: str | Path | None,
+    model_database: str,
+    selected_database: str | None = None,
+) -> bool:
+    if not model_template:
+        return True
+    selected_database = selected_database or model_database
+    return (
+        build_template_matches_database_default(model_template, model_database)
+        and selected_database != model_database
+    ) or build_template_matches_database_default(model_template, selected_database)
 
 
 def show_database_selector(config: dict[str, Any], config_path: Path) -> str:
@@ -48,7 +139,7 @@ def show_database_selector(config: dict[str, Any], config_path: Path) -> str:
     )
 
     # Show database capabilities in expander
-    with st.expander(f"📋 Database details: {selected}", expanded=False):
+    with st.expander(f"Database details: {selected}", expanded=False):
         st.code(describe_database(selected), language="text")
 
         active = sorted(get_active_oxides(selected))
@@ -68,12 +159,12 @@ def show_database_selector(config: dict[str, Any], config_path: Path) -> str:
             f"`{current_db}` is still the active thermodynamic setup. "
             f"Apply the switch before editing or running models with `{selected}`."
         )
-        if st.button(f"💾 Switch to {selected} database", type="primary"):
+        if st.button(f"Switch to {selected} database", type="primary"):
             config["database"] = selected
             if selected in DEFAULT_BUILD_TEMPLATES:
                 config["build_template_file"] = DEFAULT_BUILD_TEMPLATES[selected]
             save_config_json(config_path, config)
-            st.success(f"✅ Database changed to {selected}. The new database will be used for all future calculations.")
+            st.success(f"Database changed to {selected}. The new database will be used for all future calculations.")
             st.info("Existing models in your config remain unchanged. Their compositions may need adjustment if switching databases.")
             st.rerun()
         return current_db

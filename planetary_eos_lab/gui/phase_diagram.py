@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import colorsys
+import html
 from pathlib import Path
 from typing import Any
 
@@ -576,18 +577,26 @@ def hex_from_hls(hue: float, lightness: float, saturation: float) -> str:
     return f"#{round(red * 255):02x}{round(green * 255):02x}{round(blue * 255):02x}"
 
 
-def assemblage_colorscale(color_count: int) -> list[tuple[float, str]]:
-    """Build a discrete categorical colorscale for assemblage IDs."""
-    if color_count <= 1:
-        return [(0.0, "#7aa6c2"), (1.0, "#7aa6c2")]
-
+def assemblage_color_list(color_count: int) -> list[str]:
     colors: list[str] = []
+    if color_count <= 0:
+        return colors
+    if color_count == 1:
+        return ["#7aa6c2"]
     for index in range(color_count):
         hue = (0.58 + index * 0.61803398875) % 1.0
         lightness = 0.66 if index % 2 == 0 else 0.78
         saturation = 0.45 if index % 3 else 0.58
         colors.append(hex_from_hls(hue, lightness, saturation))
+    return colors
 
+
+def assemblage_colorscale(color_count: int) -> list[tuple[float, str]]:
+    """Build a discrete categorical colorscale for assemblage IDs."""
+    colors = assemblage_color_list(color_count)
+    if color_count <= 1:
+        color = colors[0] if colors else "#7aa6c2"
+        return [(0.0, color), (1.0, color)]
     scale: list[tuple[float, str]] = []
     for index, color in enumerate(colors):
         left = index / color_count
@@ -595,6 +604,96 @@ def assemblage_colorscale(color_count: int) -> list[tuple[float, str]]:
         scale.append((left, color))
         scale.append((right, color))
     return scale
+
+
+def display_assemblage_ids_and_labels(
+    assemblage_grid: AssemblageGrid,
+    assemblage_detail: str,
+    *,
+    pressure_count: int | None = None,
+    temperature_count: int | None = None,
+) -> tuple[list[list[int | None]], dict[int, tuple[str, ...]]]:
+    pressure_limit = pressure_count or assemblage_grid.pressure_count
+    temperature_limit = temperature_count or assemblage_grid.temperature_count
+    original_ids = [
+        row[:temperature_limit]
+        for row in assemblage_grid.ids[:pressure_limit]
+    ]
+    if assemblage_detail != DETAILED_ASSEMBLAGE_OPTION:
+        display_labels, raw_to_group_id = build_grouped_assemblage_labels(assemblage_grid, assemblage_detail)
+        display_ids = remap_assemblage_ids(original_ids, raw_to_group_id)
+    else:
+        display_labels = assemblage_grid.labels
+        display_ids = original_ids
+    return display_ids, display_labels
+
+
+def assemblage_color_key_entries(
+    assemblage_grid: AssemblageGrid,
+    assemblage_detail: str,
+    *,
+    pressure_count: int | None = None,
+    temperature_count: int | None = None,
+) -> list[tuple[str, str]]:
+    display_ids, display_labels = display_assemblage_ids_and_labels(
+        assemblage_grid,
+        assemblage_detail,
+        pressure_count=pressure_count,
+        temperature_count=temperature_count,
+    )
+    _indexed_ids, index_by_id = indexed_grid_from_ids(display_ids)
+    colors = assemblage_color_list(len(index_by_id))
+    entries: list[tuple[str, str]] = []
+    for assemblage_id, color_index in sorted(index_by_id.items(), key=lambda item: item[1]):
+        label = assemblage_field_label(display_labels.get(assemblage_id, ())) or f"Assemblage {assemblage_id}"
+        color = colors[color_index] if color_index < len(colors) else "#7aa6c2"
+        entries.append((color, label))
+    return entries
+
+
+def assemblage_color_key_html(entries: list[tuple[str, str]]) -> str:
+    items = "".join(
+        (
+            '<div style="display:flex;align-items:center;'
+            'border:1px solid rgba(20,24,28,0.18);'
+            f"border-left:1.35rem solid {color};"
+            'border-radius:6px;padding:0.42rem 0.58rem;'
+            'background-color:#ffffff;box-shadow:0 1px 2px rgba(20,24,28,0.06);">'
+            f'<span style="font-size:0.9rem;line-height:1.2;color:#20242a;">{html.escape(label)}</span>'
+            "</div>"
+        )
+        for color, label in entries
+    )
+    return (
+        '<div style="display:flex;flex-wrap:wrap;gap:0.5rem 0.6rem;'
+        'margin:0.4rem 0 0.85rem 0;">'
+        f"{items}"
+        "</div>"
+    )
+
+
+def show_assemblage_color_key(
+    assemblage_grid: AssemblageGrid,
+    assemblage_detail: str,
+    *,
+    pressure_count: int | None = None,
+    temperature_count: int | None = None,
+) -> None:
+    entries = assemblage_color_key_entries(
+        assemblage_grid,
+        assemblage_detail,
+        pressure_count=pressure_count,
+        temperature_count=temperature_count,
+    )
+    if not entries:
+        return
+
+    st.markdown("**Assemblage color key**")
+    st.caption(
+        "Geological-map style key for the stable phase assemblages. Each box lists phases stable together; "
+        "colors match the assemblage fields in the Assemblage preview."
+    )
+    st.markdown(assemblage_color_key_html(entries), unsafe_allow_html=True)
 
 
 def assemblage_hover_grid(
@@ -910,6 +1009,13 @@ def plot_phase_diagram_interactive(
         linecolor="rgba(12,16,20,0.95)",
     )
 
+    if assemblage_grid and property_choice == GRID_ONLY_OPTION:
+        show_assemblage_color_key(
+            assemblage_grid,
+            assemblage_detail,
+            pressure_count=min(len(pressures_bar), assemblage_grid.pressure_count),
+            temperature_count=min(len(temperatures_k), assemblage_grid.temperature_count),
+        )
     st.plotly_chart(fig, use_container_width=True)
 
     # Summary info
@@ -920,29 +1026,7 @@ def plot_phase_diagram_interactive(
     col4.metric("Fields shown", assemblage_count if assemblage_grid else "not found")
     col5.metric("Boundary paths", boundary_count if assemblage_grid else "not found")
 
-    if assemblage_grid:
-        if assemblage_detail == MAJOR_FRAMEWORK_ASSEMBLAGE_OPTION:
-            st.caption(
-                "Major framework boundaries group fields by the main solution-model phases "
-                "(olivine, pyroxene, garnet, spinel, plagioclase, and ilmenite). "
-                "Curved boundaries are a smoothed rendering of the VERTEX grid preview. "
-                "Switch to a more detailed assemblage option to inspect silica, melt, or minor-phase changes."
-            )
-        elif assemblage_detail == SIMPLIFIED_ASSEMBLAGE_OPTION:
-            st.caption(
-                "Simplified boundaries group silica polymorphs as SiO2 and suppress rutile-only differences "
-                "when other phases are present. Liquid component labels are grouped as Melt(L)."
-            )
-        else:
-            st.caption(
-                "Detailed assemblage boundaries are a fast preview parsed from VERTEX .plt/.blk files. "
-                "Hover over a colored field to see the stable phase assemblage. "
-                "Use PSSECT or full Perple_X plotting for publication-quality phase diagrams."
-            )
-        label_caption = assemblage_caption_text(assemblage_grid, assemblage_detail)
-        if label_caption:
-            st.caption(label_caption)
-    else:
+    if not assemblage_grid:
         st.caption(
             "No VERTEX .plt/.blk assemblage grid was found. This plot shows the P-T grid "
             "and property distribution from WERAMI output."
@@ -997,33 +1081,30 @@ def show_phase_diagram_panel(models: list[dict[str, Any]], selected_project: str
         st.warning("⚠️ Output directory not found. Run the pipeline first.")
         return
 
-    # Options
-    with st.expander("⚙️ Diagram options"):
-        st.caption("**Property to visualize**")
-        property_options = [*PROPERTY_OPTIONS.keys(), GRID_ONLY_OPTION]
-        if (
-            st.session_state.get(PHASE_PROPERTY_PROJECT_KEY) != selected_project
-            or st.session_state.get(PHASE_PROPERTY_SELECTOR_KEY) not in property_options
-        ):
-            st.session_state[PHASE_PROPERTY_SELECTOR_KEY] = DEFAULT_PHASE_PROPERTY
-            st.session_state[PHASE_PROPERTY_PROJECT_KEY] = selected_project
-        prop_choice = st.radio(
-            "Property",
-            property_options,
-            index=property_options.index(DEFAULT_PHASE_PROPERTY),
-            key=PHASE_PROPERTY_SELECTOR_KEY,
-            horizontal=True,
-            label_visibility="collapsed",
-        )
-        assemblage_detail = st.radio(
-            "Assemblage detail",
-            ASSEMBLAGE_DETAIL_OPTIONS,
-            horizontal=True,
-            help=(
-                "Major framework gives the cleanest interpretation. Simplified keeps broad silica and melt groups "
-                "but still suppresses minor one-off phase changes."
-            ),
-        )
+    st.markdown("**Diagram options**")
+    property_options = [*PROPERTY_OPTIONS.keys(), GRID_ONLY_OPTION]
+    if (
+        st.session_state.get(PHASE_PROPERTY_PROJECT_KEY) != selected_project
+        or st.session_state.get(PHASE_PROPERTY_SELECTOR_KEY) not in property_options
+    ):
+        st.session_state[PHASE_PROPERTY_SELECTOR_KEY] = DEFAULT_PHASE_PROPERTY
+        st.session_state[PHASE_PROPERTY_PROJECT_KEY] = selected_project
+    prop_choice = st.radio(
+        "Property",
+        property_options,
+        index=property_options.index(DEFAULT_PHASE_PROPERTY),
+        key=PHASE_PROPERTY_SELECTOR_KEY,
+        horizontal=True,
+    )
+    assemblage_detail = st.radio(
+        "Assemblage detail",
+        ASSEMBLAGE_DETAIL_OPTIONS,
+        horizontal=True,
+        help=(
+            "Major framework gives the cleanest interpretation. Simplified keeps broad silica and melt groups "
+            "but still suppresses minor one-off phase changes."
+        ),
+    )
 
     plot_phase_diagram_interactive(
         selected_model,

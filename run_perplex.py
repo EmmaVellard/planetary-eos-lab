@@ -30,17 +30,51 @@ DEFAULT_BUILD_TEMPLATES = {
 COMPONENT_COMPOSITION_BASIS = "perplex_components"
 COMPONENT_COMPOSITION_ALIASES = {"perplex_components", "components", "elements", "element_components"}
 
-PERPLEX_OPTION_TEXT = """\
+@dataclass(frozen=True)
+class PerplexOptions:
+    sample_on_grid: bool = False
+    x_nodes: tuple[int, int] = (40, 300)
+    y_nodes: tuple[int, int] = (40, 300)
+    grid_levels: tuple[int, int] = (1, 4)
+    auto_refine: str = "auto"
+    final_resolution: tuple[str, str] = ("2.5e-4", "2.5e-4")
+
+
+DEFAULT_PERPLEX_OPTIONS = PerplexOptions()
+
+
+def effective_perplex_options(options: PerplexOptions = DEFAULT_PERPLEX_OPTIONS) -> PerplexOptions:
+    if not options.sample_on_grid:
+        return options
+    return PerplexOptions(
+        sample_on_grid=options.sample_on_grid,
+        x_nodes=options.x_nodes,
+        y_nodes=options.y_nodes,
+        grid_levels=(1, 1),
+        auto_refine=options.auto_refine,
+        final_resolution=options.final_resolution,
+    )
+
+
+def render_perplex_option_text(options: PerplexOptions = DEFAULT_PERPLEX_OPTIONS) -> str:
+    options = effective_perplex_options(options)
+    sample_on_grid = "T" if options.sample_on_grid else "F"
+    return f"""\
 warn_interactive F
 pause_on_error F
 spreadsheet T
-sample_on_grid T
+sample_on_grid {sample_on_grid}
 seismic_data_file T
 bad_number NaN
-grid_levels 1 1
-x_nodes 20 40
-y_nodes 20 40
+grid_levels {options.grid_levels[0]} {options.grid_levels[1]}
+x_nodes {options.x_nodes[0]} {options.x_nodes[1]}
+y_nodes {options.y_nodes[0]} {options.y_nodes[1]}
+auto_refine {options.auto_refine}
+final_resolution {options.final_resolution[0]} {options.final_resolution[1]}
 """
+
+
+PERPLEX_OPTION_TEXT = render_perplex_option_text(DEFAULT_PERPLEX_OPTIONS)
 
 DEFAULT_WERAMI_INPUT_SEQUENCE = (
     "2",
@@ -178,6 +212,7 @@ class ModelConfig:
     planetprofile_readiness: str | None = None
     composition_interpretation: str | None = None
     werami_input_sequence: tuple[str, ...] = DEFAULT_WERAMI_INPUT_SEQUENCE
+    perplex_options: PerplexOptions = DEFAULT_PERPLEX_OPTIONS
 
 
 @dataclass(frozen=True)
@@ -232,6 +267,80 @@ def werami_sequence_from_config(model: dict, database: str = DEFAULT_DATABASE) -
     return tuple(str(item) for item in sequence)
 
 
+def boolean_option_from_config(value: object, *, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().upper()
+        if normalized in {"T", "TRUE", "Y", "YES", "1"}:
+            return True
+        if normalized in {"F", "FALSE", "N", "NO", "0"}:
+            return False
+    raise ValueError(f"{field_name} must be True or False; legacy T/F values are also accepted.")
+
+
+def integer_pair_from_config(value: object, *, field_name: str, minimum: int = 2) -> tuple[int, int]:
+    if isinstance(value, str):
+        parts = value.replace(",", " ").split()
+    elif isinstance(value, (list, tuple)):
+        parts = list(value)
+    else:
+        raise ValueError(f"{field_name} must be a two-item list or string.")
+    if len(parts) != 2:
+        raise ValueError(f"{field_name} must contain exactly two values.")
+    try:
+        first, second = int(parts[0]), int(parts[1])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} values must be integers.") from exc
+    if first < minimum or second < minimum:
+        raise ValueError(f"{field_name} values must be at least {minimum}.")
+    if first > second:
+        raise ValueError(f"{field_name} minimum cannot exceed maximum.")
+    return first, second
+
+
+def string_pair_from_config(value: object, *, field_name: str) -> tuple[str, str]:
+    if isinstance(value, str):
+        parts = value.replace(",", " ").split()
+    elif isinstance(value, (list, tuple)):
+        parts = [str(item) for item in value]
+    else:
+        raise ValueError(f"{field_name} must be a two-item list or string.")
+    if len(parts) != 2:
+        raise ValueError(f"{field_name} must contain exactly two values.")
+    return str(parts[0]), str(parts[1])
+
+
+def perplex_options_from_config(
+    value: object,
+    fallback: PerplexOptions = DEFAULT_PERPLEX_OPTIONS,
+) -> PerplexOptions:
+    if value is None:
+        return fallback
+    if not isinstance(value, dict):
+        raise ValueError("perplex_options must be a JSON object.")
+
+    sample_on_grid = fallback.sample_on_grid
+    if "sample_on_grid" in value:
+        sample_on_grid = boolean_option_from_config(value["sample_on_grid"], field_name="sample_on_grid")
+
+    return PerplexOptions(
+        sample_on_grid=sample_on_grid,
+        x_nodes=integer_pair_from_config(value.get("x_nodes", list(fallback.x_nodes)), field_name="x_nodes"),
+        y_nodes=integer_pair_from_config(value.get("y_nodes", list(fallback.y_nodes)), field_name="y_nodes"),
+        grid_levels=integer_pair_from_config(
+            value.get("grid_levels", list(fallback.grid_levels)),
+            field_name="grid_levels",
+            minimum=1,
+        ),
+        auto_refine=str(value.get("auto_refine", fallback.auto_refine)).strip() or fallback.auto_refine,
+        final_resolution=string_pair_from_config(
+            value.get("final_resolution", list(fallback.final_resolution)),
+            field_name="final_resolution",
+        ),
+    )
+
+
 def load_config(
     config_path: Path,
     *,
@@ -246,6 +355,7 @@ def load_config(
         )
     data = json.loads(config_path.read_text(encoding="utf-8"))
     pipeline_database = resolve_database_name(database_override or data.get("database", DEFAULT_DATABASE))
+    pipeline_perplex_options = perplex_options_from_config(data.get("perplex_options"))
     configured_build_template = data.get("build_template_file")
     models: list[ModelConfig] = []
 
@@ -253,6 +363,10 @@ def load_config(
         project = model["project"]
         model_database = resolve_database_name(model.get("database", pipeline_database))
         planetprofile_first_axis = planetprofile_first_axis_from_config(model)
+        model_perplex_options = perplex_options_from_config(
+            model.get("perplex_options"),
+            fallback=pipeline_perplex_options,
+        )
         model_build_template = model.get("build_input_file") or model.get("build_template_file")
         if model_build_template:
             build_input_file = resolve_path(model_build_template, base_dir)
@@ -288,6 +402,7 @@ def load_config(
                 planetprofile_readiness=model.get("planetprofile_readiness"),
                 composition_interpretation=model.get("composition_interpretation"),
                 werami_input_sequence=werami_sequence_from_config(model, model_database),
+                perplex_options=model_perplex_options,
             )
         )
 
@@ -372,10 +487,10 @@ def require_perplex_dir(perplex_dir: Path) -> None:
         raise FileNotFoundError(f"Perple_X path is not a directory: {perplex_dir}")
 
 
-def write_options(work_dir: Path) -> Path:
+def write_options(work_dir: Path, options: PerplexOptions = DEFAULT_PERPLEX_OPTIONS) -> Path:
     work_dir.mkdir(parents=True, exist_ok=True)
     option_path = work_dir / "perplex_option.dat"
-    option_path.write_text(PERPLEX_OPTION_TEXT)
+    option_path.write_text(render_perplex_option_text(options))
     return option_path
 
 
@@ -784,6 +899,14 @@ def build_template_provenance(perplex_dir: Path, model: ModelConfig) -> dict:
         "p_t_range": db.pt_range,
         "excluded_phases": list(db.excluded_phases),
         "solution_models": list(db.solution_models),
+        "perplex_options": {
+            "sample_on_grid": model.perplex_options.sample_on_grid,
+            "x_nodes": list(model.perplex_options.x_nodes),
+            "y_nodes": list(model.perplex_options.y_nodes),
+            "grid_levels": list(model.perplex_options.grid_levels),
+            "auto_refine": model.perplex_options.auto_refine,
+            "final_resolution": list(model.perplex_options.final_resolution),
+        },
         "provenance_note": (
             f"These fields describe the '{model.database}' thermodynamic profile used by this model. "
             f"Source-only oxides for this profile: {', '.join(source_only) if source_only else 'none'}. "
@@ -937,7 +1060,7 @@ def run_model(perplex_dir: Path, model: ModelConfig, *, skip_validation: bool = 
     else:
         warn_omitted_oxides(model)
 
-    option_path = write_options(model.work_dir)
+    option_path = write_options(model.work_dir, model.perplex_options)
     print(f"Wrote {option_path}")
     run_build(perplex_dir, model)
     require_dat_file(model.work_dir, model.project)

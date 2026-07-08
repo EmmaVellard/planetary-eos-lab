@@ -38,6 +38,10 @@ MIGRATION_GUIDE.md
 # Files
 docs/
 fits/
+fits_plots/
+fits*
+comparison_plots/
+compare*
 
 # Python
 __pycache__/

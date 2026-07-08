@@ -72,7 +72,7 @@ def show_batch_workspace(config_path: Path, config: dict[str, Any], models: list
         config: Configuration dictionary
         models: List of existing models
     """
-    st.header("Batch Processing")
+    st.subheader("Batch Processing")
     st.caption("Generate multiple compositions with systematic parameter variations")
 
     if not models:

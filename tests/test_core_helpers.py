@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from planetary_eos_lab.core import config_io, model_schema, pipeline_runner, validation_summary
+from planetary_eos_lab.gui import database_selector
 from planetary_eos_lab.gui.import_export import export_model_definitions_to_json, model_definitions_export_filename
 
 
@@ -78,6 +79,28 @@ def test_model_definition_export_serializes_selected_models() -> None:
     assert "not generated Perple_X output tables" in exported["description"]
     assert model_definitions_export_filename(["second_model"]) == "second_model_model_definition.json"
     assert model_definitions_export_filename(["first", "second"]) == "planetary_eos_lab_model_definitions.json"
+
+
+def test_build_template_catalog_matches_database_defaults() -> None:
+    templates = database_selector.available_build_templates()
+
+    assert database_selector.DEFAULT_BUILD_TEMPLATES["stx21"] in templates
+    assert database_selector.DEFAULT_BUILD_TEMPLATES["hp633"] in templates
+    assert "build_inputs/icy_hpha02_hydrous_template.build.in" in templates
+    assert database_selector.build_template_database("build_inputs/lunar_hp633_template.build.in") == "hp633"
+    assert database_selector.build_template_label(
+        "build_inputs/lunar_hp633_template.build.in",
+        selected_database="hp633",
+    ) == "lunar_hp633_template.build.in - default for hp633"
+
+    absolute_template = database_selector.REPO_ROOT / "build_inputs" / "lunar_hp633_template.build.in"
+    assert database_selector.normalize_build_template_path(absolute_template) == "build_inputs/lunar_hp633_template.build.in"
+    assert database_selector.build_template_matches_database_default(absolute_template, "hp633")
+    assert database_selector.model_uses_database_default_template(
+        "build_inputs/lunar_stx21_template.build.in",
+        model_database="stx21",
+        selected_database="hp633",
+    )
 
 
 def test_model_validation_normalization_and_omitted_oxides() -> None:
