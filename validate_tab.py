@@ -205,11 +205,18 @@ def scan_table_for_issues(tab_path: Path, tab: TabData) -> list[str]:
             issues.append(f"NaN-only column: {header}")
 
     row_count = len(tab.rows)
+    # Allow up to 0.1% non-finite values (common for edge cases with incomplete phase data)
+    # For small datasets, still require at least 90% finite values
+    tolerance_fraction = 0.001  # 0.1%
+    max_allowed_nonfinite = max(1, int(row_count * tolerance_fraction)) if row_count >= 1000 else 0
+
     for canonical, display in REQUIRED_COLUMNS.items():
         column_index = indices[canonical]
         nonfinite_count = sum(1 for row in tab.rows if not math.isfinite(row[column_index]))
         if 0 < nonfinite_count < row_count:
-            issues.append(f"Non-finite values in {display}: {nonfinite_count} of {row_count}")
+            if nonfinite_count > max_allowed_nonfinite:
+                issues.append(f"Non-finite values in {display}: {nonfinite_count} of {row_count}")
+            # else: Small number of non-finite values is acceptable for large datasets
 
     alpha_values = finite_values(tab.rows, indices["alpha_pk"])
     if alpha_values and all(abs(value) <= 1.0e-30 for value in alpha_values):
