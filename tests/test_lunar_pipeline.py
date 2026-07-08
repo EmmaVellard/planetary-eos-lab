@@ -902,7 +902,7 @@ def test_phase_diagram_simplified_assemblages_group_minor_phase_changes() -> Non
         assemblage_grid,
         phase_diagram.MAJOR_FRAMEWORK_ASSEMBLAGE_OPTION,
     )
-    assert color_entries[0][1] == "Cpx + Gt"
+    assert color_entries[0][1] == "clinopyroxene + garnet"
     color_key_html = phase_diagram.assemblage_color_key_html(color_entries)
     assert color_key_html.startswith("<div")
     assert "background-color:" in color_key_html

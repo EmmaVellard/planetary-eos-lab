@@ -228,11 +228,18 @@ def phase_display_name(phase: str) -> str:
     return f"{phase} ({hint})" if hint else phase
 
 
+def phase_short_name(phase: str) -> str:
+    """Return abbreviated phase name for compact hover display."""
+    clean_phase = phase.replace("(HP)", "").replace("(WPH)", "").replace("(I1,HP)", "")
+    return PHASE_ABBREVIATION_CAPTIONS.get(clean_phase, clean_phase)
+
+
 def assemblage_hover_text(assemblage_id: int, phases: tuple[str, ...], *, label: str = "Assemblage") -> str:
     if not phases:
         return f"{label} {assemblage_id}<br>phase labels unavailable"
-    expanded_phases = " + ".join(phase_display_name(phase) for phase in phases)
-    return f"{label} {assemblage_id}<br>{expanded_phases}"
+    # Use short names without chemical formulas for compact display
+    short_phases = " + ".join(phase_short_name(phase) for phase in phases)
+    return f"{label} {assemblage_id}<br>{short_phases}"
 
 
 def simplified_phase_tuple(phases: tuple[str, ...]) -> tuple[str, ...]:
@@ -469,6 +476,20 @@ def assemblage_field_label(phases: tuple[str, ...]) -> str:
     return " + ".join(cleaned)
 
 
+def assemblage_field_label_expanded(phases: tuple[str, ...]) -> str:
+    """Return assemblage label with full mineral names instead of abbreviations."""
+    if not phases:
+        return ""
+    expanded_names: list[str] = []
+    for phase in phases:
+        # Clean up suffixes
+        clean_phase = phase.replace("(HP)", "").replace("(WPH)", "").replace("(I1,HP)", "")
+        # Get full name from captions, fallback to abbreviation
+        full_name = PHASE_ABBREVIATION_CAPTIONS.get(clean_phase, clean_phase)
+        expanded_names.append(full_name)
+    return " + ".join(expanded_names)
+
+
 def phase_abbreviation(phase: str) -> str:
     if phase.endswith(LIQUID_COMPONENT_SUFFIX) and len(phase) > len(LIQUID_COMPONENT_SUFFIX):
         return "Melt(L)"
@@ -646,7 +667,7 @@ def assemblage_color_key_entries(
     colors = assemblage_color_list(len(index_by_id))
     entries: list[tuple[str, str]] = []
     for assemblage_id, color_index in sorted(index_by_id.items(), key=lambda item: item[1]):
-        label = assemblage_field_label(display_labels.get(assemblage_id, ())) or f"Assemblage {assemblage_id}"
+        label = assemblage_field_label_expanded(display_labels.get(assemblage_id, ())) or f"Assemblage {assemblage_id}"
         color = colors[color_index] if color_index < len(colors) else "#7aa6c2"
         entries.append((color, label))
     return entries
@@ -852,23 +873,28 @@ def add_assemblage_preview_traces(
     return len(index_by_id), boundary_count
 
 
-def plot_phase_diagram_interactive(
+def build_phase_diagram_figure(
     model: dict[str, Any],
     output_dir: Path,
     property_choice: str = "Density",
     assemblage_detail: str = MAJOR_FRAMEWORK_ASSEMBLAGE_OPTION,
-):
-    """Create interactive P-T phase diagram with Plotly.
+) -> tuple[go.Figure | None, dict[str, Any]]:
+    """Build phase diagram figure without displaying it.
 
-    Note: Phase diagrams require structured phase data from VERTEX.
-    This implementation shows the P-T grid coverage and property contours
-    as a fallback when phase info is unavailable.
-
-    Args:
-        model: Model configuration
-        output_dir: Output directory path
+    Returns:
+        tuple: (figure, metadata) where metadata contains grid info and counts
     """
     project = model.get("project", "unknown")
+    metadata: dict[str, Any] = {
+        "project": project,
+        "point_count": 0,
+        "assemblage_count": 0,
+        "boundary_count": 0,
+        "temperatures_k": [],
+        "pressures_bar": [],
+        "assemblage_grid": None,
+        "property_choice": property_choice,
+    }
 
     # Try to parse VERTEX log first
     vertex_log = output_dir / "vertex.log"
@@ -881,19 +907,21 @@ def plot_phase_diagram_interactive(
     tab_path = output_dir / f"{project}_planetprofile.tab"
 
     if not tab_path.exists():
-        st.warning("⚠️ No output file found. Run Perple_X first to generate phase diagram.")
-        return
+        return None, metadata
 
     # Get P-T grid
     pressures_bar, temperatures_k = get_pt_grid_from_tab(tab_path)
 
     if not pressures_bar or not temperatures_k:
-        st.error("❌ Could not extract P-T grid from output file")
-        return
+        return None, metadata
+
+    metadata["temperatures_k"] = temperatures_k
+    metadata["pressures_bar"] = pressures_bar
 
     fig = go.Figure()
     plt_path, blk_path = assemblage_files(output_dir, project)
     assemblage_grid = parse_assemblage_grid(plt_path, blk_path)
+    metadata["assemblage_grid"] = assemblage_grid
 
     point_count = 0
     assemblage_count = 0
@@ -960,9 +988,12 @@ def plot_phase_diagram_interactive(
                 assemblage_detail=assemblage_detail,
             )
 
-    except Exception as e:
-        st.error(f"❌ Error reading output file: {e}")
-        return
+    except Exception:
+        return None, metadata
+
+    metadata["point_count"] = point_count
+    metadata["assemblage_count"] = assemblage_count
+    metadata["boundary_count"] = boundary_count
 
     plot_title = (
         f"{assemblage_detail} Boundary Preview"
@@ -1009,6 +1040,43 @@ def plot_phase_diagram_interactive(
         linewidth=2,
         linecolor="rgba(12,16,20,0.95)",
     )
+
+    return fig, metadata
+
+
+def plot_phase_diagram_interactive(
+    model: dict[str, Any],
+    output_dir: Path,
+    property_choice: str = "Density",
+    assemblage_detail: str = MAJOR_FRAMEWORK_ASSEMBLAGE_OPTION,
+):
+    """Create interactive P-T phase diagram with Plotly and display it.
+
+    Note: Phase diagrams require structured phase data from VERTEX.
+    This implementation shows the P-T grid coverage and property contours
+    as a fallback when phase info is unavailable.
+
+    Args:
+        model: Model configuration
+        output_dir: Output directory path
+        property_choice: Property to display
+        assemblage_detail: Level of assemblage detail
+    """
+    fig, metadata = build_phase_diagram_figure(model, output_dir, property_choice, assemblage_detail)
+
+    if fig is None:
+        if not (output_dir / f"{model.get('project', 'unknown')}_planetprofile.tab").exists():
+            st.warning("⚠️ No output file found. Run Perple_X first to generate phase diagram.")
+        else:
+            st.error("❌ Could not extract P-T grid from output file")
+        return
+
+    assemblage_grid = metadata["assemblage_grid"]
+    temperatures_k = metadata["temperatures_k"]
+    pressures_bar = metadata["pressures_bar"]
+    point_count = metadata["point_count"]
+    assemblage_count = metadata["assemblage_count"]
+    boundary_count = metadata["boundary_count"]
 
     if assemblage_grid and property_choice == GRID_ONLY_OPTION:
         show_assemblage_color_key(

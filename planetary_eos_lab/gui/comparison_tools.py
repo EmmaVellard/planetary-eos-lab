@@ -239,14 +239,14 @@ def show_properties_comparison(projects: list[str], config_path: Path):
 
 
 def show_phase_diagram_comparison(models: list[dict[str, Any]], config_path: Path):
-    """Display side-by-side phase diagram comparison.
+    """Display vertically stacked phase diagrams with synchronized hover.
 
     Args:
         models: List of models to compare
         config_path: Path to config file
     """
     st.subheader("Phase Diagram Comparison")
-    st.caption("View phase diagrams side-by-side for the selected models")
+    st.caption("Phase diagrams stacked vertically with synchronized hover - hover over one to see the same P-T point on all")
 
     # Shared controls
     col1, col2 = st.columns(2)
@@ -267,34 +267,103 @@ def show_phase_diagram_comparison(models: list[dict[str, Any]], config_path: Pat
             horizontal=True,
         )
 
-    # Create columns for each model
-    if len(models) <= 2:
-        cols = st.columns(len(models))
-    else:
-        # For 3-4 models, use 2x2 grid
-        row1_cols = st.columns(2)
-        row2_cols = st.columns(2)
-        cols = row1_cols + row2_cols
+    # Build figures for all models
+    figures_and_metadata: list[tuple[go.Figure, dict[str, Any]]] = []
+    for model in models:
+        paths = model_output_paths(model, config_path)
+        output_dir = paths.output_dir
 
-    for idx, model in enumerate(models):
-        with cols[idx]:
-            st.markdown(f"**{model['project']}**")
-            paths = model_output_paths(model, config_path)
-            output_dir = paths.output_dir
+        if not output_dir.exists():
+            st.warning(f"⚠️ Output directory not found for {model['project']}")
+            continue
 
-            if not output_dir.exists():
-                st.warning(f"⚠️ Output directory not found for {model['project']}")
-                continue
+        try:
+            fig, metadata = phase_diagram.build_phase_diagram_figure(
+                model,
+                output_dir,
+                property_choice=prop_choice,
+                assemblage_detail=assemblage_detail,
+            )
+            if fig is not None:
+                figures_and_metadata.append((fig, metadata))
+        except Exception as e:
+            st.error(f"❌ Error building diagram for {model['project']}: {e}")
 
-            try:
-                phase_diagram.plot_phase_diagram_interactive(
-                    model,
-                    output_dir,
-                    property_choice=prop_choice,
-                    assemblage_detail=assemblage_detail,
+    if not figures_and_metadata:
+        st.info("No phase diagrams available for the selected models")
+        return
+
+    # Create combined figure with subplots
+    from plotly.subplots import make_subplots
+
+    n_models = len(figures_and_metadata)
+    combined_fig = make_subplots(
+        rows=n_models,
+        cols=1,
+        subplot_titles=[metadata["project"] for _, metadata in figures_and_metadata],
+        vertical_spacing=0.08,
+        row_heights=[1.0 / n_models] * n_models,
+    )
+
+    # Add traces from each figure to the combined figure
+    for idx, (fig, metadata) in enumerate(figures_and_metadata):
+        row = idx + 1
+        for trace in fig.data:
+            combined_fig.add_trace(trace, row=row, col=1)
+
+    # Update layout for synchronized hover
+    combined_fig.update_layout(
+        height=600 * n_models,
+        hovermode="x unified",
+        showlegend=False,
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+    )
+
+    # Update axes for all subplots
+    for idx in range(1, n_models + 1):
+        combined_fig.update_xaxes(
+            title_text="Temperature (K)" if idx == n_models else "",
+            showgrid=True,
+            gridcolor="rgba(20,24,28,0.08)",
+            zeroline=False,
+            ticks="outside",
+            showline=True,
+            mirror=True,
+            linewidth=2,
+            linecolor="rgba(12,16,20,0.95)",
+            row=idx,
+            col=1,
+        )
+        combined_fig.update_yaxes(
+            title_text="Pressure (GPa)",
+            autorange="reversed",
+            showgrid=True,
+            gridcolor="rgba(20,24,28,0.08)",
+            zeroline=False,
+            ticks="outside",
+            showline=True,
+            mirror=True,
+            linewidth=2,
+            linecolor="rgba(12,16,20,0.95)",
+            row=idx,
+            col=1,
+        )
+
+    st.plotly_chart(combined_fig, use_container_width=True)
+
+    # Show assemblage color key if applicable
+    if prop_choice == phase_diagram.GRID_ONLY_OPTION:
+        for _, metadata in figures_and_metadata:
+            assemblage_grid = metadata.get("assemblage_grid")
+            if assemblage_grid:
+                st.markdown(f"**{metadata['project']} assemblage key:**")
+                phase_diagram.show_assemblage_color_key(
+                    assemblage_grid,
+                    assemblage_detail,
+                    pressure_count=min(len(metadata["pressures_bar"]), assemblage_grid.pressure_count),
+                    temperature_count=min(len(metadata["temperatures_k"]), assemblage_grid.temperature_count),
                 )
-            except Exception as e:
-                st.error(f"❌ Error plotting {model['project']}: {e}")
 
 
 def show_validation_comparison(models: list[dict[str, Any]], config_path: Path):
