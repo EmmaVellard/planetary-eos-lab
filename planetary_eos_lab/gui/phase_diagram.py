@@ -680,8 +680,11 @@ def assemblage_color_key_html(entries: list[tuple[str, str]]) -> str:
             'border:1px solid rgba(20,24,28,0.18);'
             f"border-left:1.35rem solid {color};"
             'border-radius:6px;padding:0.42rem 0.58rem;'
-            'background-color:#ffffff;box-shadow:0 1px 2px rgba(20,24,28,0.06);">'
-            f'<span style="font-size:0.9rem;line-height:1.2;color:#20242a;">{html.escape(label)}</span>'
+            'background-color:#ffffff;box-shadow:0 1px 2px rgba(20,24,28,0.06);'
+            'min-width:0;flex-shrink:1;">'
+            f'<span style="font-size:0.85rem;line-height:1.2;color:#20242a;'
+            'word-break:break-word;overflow-wrap:break-word;white-space:normal;">'
+            f'{html.escape(label)}</span>'
             "</div>"
         )
         for color, label in entries
@@ -777,6 +780,7 @@ def add_assemblage_preview_traces(
     *,
     show_heatmap: bool,
     assemblage_detail: str,
+    property_grid: tuple[list[float], list[float], list[list[float | None]], dict[str, str]] | None = None,
 ) -> tuple[int, int]:
     pressure_count = min(len(pressures_bar), assemblage_grid.pressure_count)
     temperature_count = min(len(temperatures_k), assemblage_grid.temperature_count)
@@ -825,13 +829,44 @@ def add_assemblage_preview_traces(
             )
         )
 
-    hover_x, hover_y, hover_text = assemblage_hover_points(
-        display_ids,
-        display_labels,
-        temperatures,
-        pressures_gpa,
-        hover_label=hover_label,
-    )
+    # Build hover text with optional property values
+    if property_grid:
+        prop_temps, prop_pressures, prop_z_values, prop_config = property_grid
+        # Create property lookup by (T, P) for faster access
+        prop_lookup: dict[tuple[float, float], float] = {}
+        for p_idx, p_row in enumerate(prop_z_values):
+            for t_idx, z_val in enumerate(p_row):
+                if z_val is not None and t_idx < len(prop_temps) and p_idx < len(prop_pressures):
+                    prop_lookup[(prop_temps[t_idx], prop_pressures[p_idx])] = z_val
+
+        hover_x, hover_y, hover_text = [], [], []
+        for row_index, row in enumerate(display_ids[: len(pressures_gpa)]):
+            for column_index, assemblage_id in enumerate(row[: len(temperatures)]):
+                if assemblage_id is None:
+                    continue
+                phases = display_labels.get(assemblage_id, ())
+                t_val = temperatures[column_index]
+                p_val = pressures_gpa[row_index]
+                hover_x.append(t_val)
+                hover_y.append(p_val)
+
+                base_text = assemblage_hover_text(assemblage_id, phases, label=hover_label)
+                # Look up property value
+                prop_val = prop_lookup.get((t_val, p_val))
+                if prop_val is not None:
+                    prop_text = f"{prop_config['label']}: {prop_val:.3g} {prop_config['unit']}"
+                    hover_text.append(f"{base_text}<br>{prop_text}")
+                else:
+                    hover_text.append(base_text)
+    else:
+        hover_x, hover_y, hover_text = assemblage_hover_points(
+            display_ids,
+            display_labels,
+            temperatures,
+            pressures_gpa,
+            hover_label=hover_label,
+        )
+
     if hover_x:
         fig.add_trace(
             go.Scatter(
@@ -926,6 +961,7 @@ def build_phase_diagram_figure(
     point_count = 0
     assemblage_count = 0
     boundary_count = 0
+    property_grid_data = None
     try:
         if property_choice in PROPERTY_OPTIONS:
             temperatures, pressures, z_values, point_count, property_config = property_grid_from_tab(
@@ -937,6 +973,7 @@ def build_phase_diagram_figure(
                 t_points, p_points = grid_points_from_tab(tab_path)
                 property_choice = GRID_ONLY_OPTION
             else:
+                property_grid_data = (temperatures, pressures, z_values, property_config)
                 fig.add_trace(
                     go.Heatmap(
                         x=temperatures,
@@ -965,6 +1002,7 @@ def build_phase_diagram_figure(
                     pressures_bar,
                     show_heatmap=True,
                     assemblage_detail=assemblage_detail,
+                    property_grid=None,
                 )
             else:
                 fig.add_trace(
@@ -986,6 +1024,7 @@ def build_phase_diagram_figure(
                 pressures_bar,
                 show_heatmap=False,
                 assemblage_detail=assemblage_detail,
+                property_grid=property_grid_data,
             )
 
     except Exception:
