@@ -17,6 +17,7 @@ from planetary_eos_lab.core.validation_summary import (
     read_text_if_exists,
     validation_status,
 )
+from planetary_eos_lab.gui import phase_diagram
 
 
 def show_comparison_workspace(models: list[dict[str, Any]], config_path: Path):
@@ -50,7 +51,7 @@ def show_comparison_workspace(models: list[dict[str, Any]], config_path: Path):
     selected_models = [m for m in models if m["project"] in selected]
 
     # Comparison type tabs
-    tab1, tab2, tab3 = st.tabs(["Composition", "Properties", "Validation"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Composition", "Properties", "Phase Diagrams", "Validation"])
 
     with tab1:
         show_composition_comparison(selected, config_path)
@@ -59,6 +60,9 @@ def show_comparison_workspace(models: list[dict[str, Any]], config_path: Path):
         show_properties_comparison(selected, config_path)
 
     with tab3:
+        show_phase_diagram_comparison(selected_models, config_path)
+
+    with tab4:
         show_validation_comparison(selected_models, config_path)
 
 
@@ -232,6 +236,65 @@ def show_properties_comparison(projects: list[str], config_path: Path):
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
         st.info(f"Property comparison plot is unavailable for this selection: {exc}")
         return
+
+
+def show_phase_diagram_comparison(models: list[dict[str, Any]], config_path: Path):
+    """Display side-by-side phase diagram comparison.
+
+    Args:
+        models: List of models to compare
+        config_path: Path to config file
+    """
+    st.subheader("Phase Diagram Comparison")
+    st.caption("View phase diagrams side-by-side for the selected models")
+
+    # Shared controls
+    col1, col2 = st.columns(2)
+    with col1:
+        property_options = [*phase_diagram.PROPERTY_OPTIONS.keys(), phase_diagram.GRID_ONLY_OPTION]
+        prop_choice = st.radio(
+            "Property",
+            property_options,
+            index=property_options.index(phase_diagram.DEFAULT_PHASE_PROPERTY),
+            key="phase_comparison_property",
+            horizontal=True,
+        )
+    with col2:
+        assemblage_detail = st.radio(
+            "Assemblage detail",
+            phase_diagram.ASSEMBLAGE_DETAIL_OPTIONS,
+            key="phase_comparison_assemblage",
+            horizontal=True,
+        )
+
+    # Create columns for each model
+    if len(models) <= 2:
+        cols = st.columns(len(models))
+    else:
+        # For 3-4 models, use 2x2 grid
+        row1_cols = st.columns(2)
+        row2_cols = st.columns(2)
+        cols = row1_cols + row2_cols
+
+    for idx, model in enumerate(models):
+        with cols[idx]:
+            st.markdown(f"**{model['project']}**")
+            paths = model_output_paths(model, config_path)
+            output_dir = paths.output_dir
+
+            if not output_dir.exists():
+                st.warning(f"⚠️ Output directory not found for {model['project']}")
+                continue
+
+            try:
+                phase_diagram.plot_phase_diagram_interactive(
+                    model,
+                    output_dir,
+                    property_choice=prop_choice,
+                    assemblage_detail=assemblage_detail,
+                )
+            except Exception as e:
+                st.error(f"❌ Error plotting {model['project']}: {e}")
 
 
 def show_validation_comparison(models: list[dict[str, Any]], config_path: Path):

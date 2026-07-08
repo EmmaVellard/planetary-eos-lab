@@ -222,6 +222,19 @@ def inject_styles() -> None:
         a:hover {
             color: #b19cd9 !important;
         }
+        /* Home button special styling */
+        div[data-testid="stSidebar"] button[data-testid*="workspace_mode_Home"] {
+            background: linear-gradient(135deg, #b19cd9 0%, #8877b8 100%) !important;
+            border: 2px solid #8877b8 !important;
+            color: white !important;
+            font-weight: 700 !important;
+            box-shadow: 0 2px 6px rgba(136, 119, 184, 0.25);
+        }
+        div[data-testid="stSidebar"] button[data-testid*="workspace_mode_Home"]:hover {
+            background: linear-gradient(135deg, #a28dca 0%, #7766a9 100%) !important;
+            border-color: #7766a9 !important;
+            box-shadow: 0 3px 8px rgba(136, 119, 184, 0.35);
+        }
         </style>
         """,
         unsafe_allow_html=True,

@@ -53,32 +53,33 @@ DETAILED_ASSEMBLAGE_OPTION = "Full Perple_X detail"
 ASSEMBLAGE_DETAIL_OPTIONS = [
     MAJOR_FRAMEWORK_ASSEMBLAGE_OPTION,
     SIMPLIFIED_ASSEMBLAGE_OPTION,
+    DETAILED_ASSEMBLAGE_OPTION,
 ]
 PHASE_NAME_HINTS = {
     "SiO2": "silica phase group",
     "Melt(L)": "liquid/melt component group",
-    "O": "olivine solution model",
-    "O(HP)": "olivine solution model",
-    "Opx": "orthopyroxene solution model",
-    "Opx(HP)": "orthopyroxene solution model",
-    "Cpx": "clinopyroxene solution model",
-    "Cpx(HP)": "clinopyroxene solution model",
-    "Gt": "garnet solution model",
-    "Gt(HP)": "garnet solution model",
-    "Sp": "spinel solution model",
-    "Sp(HP)": "spinel solution model",
-    "Pl": "plagioclase solution model",
-    "Pl(I1,HP)": "plagioclase solution model",
-    "Ilm": "ilmenite solution model",
-    "Ilm(WPH)": "ilmenite solution model",
-    "coe": "coesite",
-    "coes": "coesite",
-    "q": "quartz",
-    "qtz": "quartz",
-    "ru": "rutile",
-    "crst": "cristobalite",
-    "trd": "tridymite",
-    "ky": "kyanite",
+    "O": "olivine (Mg,Fe)₂SiO₄",
+    "O(HP)": "olivine (Mg,Fe)₂SiO₄",
+    "Opx": "orthopyroxene (Mg,Fe)SiO₃",
+    "Opx(HP)": "orthopyroxene (Mg,Fe)SiO₃",
+    "Cpx": "clinopyroxene Ca(Mg,Fe)Si₂O₆",
+    "Cpx(HP)": "clinopyroxene Ca(Mg,Fe)Si₂O₆",
+    "Gt": "garnet (Mg,Fe,Ca)₃Al₂Si₃O₁₂",
+    "Gt(HP)": "garnet (Mg,Fe,Ca)₃Al₂Si₃O₁₂",
+    "Sp": "spinel (Mg,Fe)Al₂O₄",
+    "Sp(HP)": "spinel (Mg,Fe)Al₂O₄",
+    "Pl": "plagioclase (Na,Ca)Al(Si,Al)₃O₈",
+    "Pl(I1,HP)": "plagioclase (Na,Ca)Al(Si,Al)₃O₈",
+    "Ilm": "ilmenite FeTiO₃",
+    "Ilm(WPH)": "ilmenite FeTiO₃",
+    "coe": "coesite SiO₂",
+    "coes": "coesite SiO₂",
+    "q": "quartz SiO₂",
+    "qtz": "quartz SiO₂",
+    "ru": "rutile TiO₂",
+    "crst": "cristobalite SiO₂",
+    "trd": "tridymite SiO₂",
+    "ky": "kyanite Al₂SiO₅",
 }
 PHASE_ABBREVIATION_CAPTIONS = {
     "O": "olivine",
@@ -964,9 +965,9 @@ def plot_phase_diagram_interactive(
         return
 
     plot_title = (
-        f"{assemblage_detail} Boundary Preview: {project}"
+        f"{assemblage_detail} Boundary Preview"
         if property_choice == GRID_ONLY_OPTION
-        else f"{property_choice} with {assemblage_detail} Boundaries: {project}"
+        else f"{property_choice} with {assemblage_detail} Boundaries"
     )
     fig.update_layout(
         title=plot_title,
