@@ -129,6 +129,22 @@ def derived_mantle_entry(
     return entry
 
 
+def upsert_custom_database(config: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any]:
+    """Add or replace (by name) an entry of the config's custom_databases list."""
+    updated = deepcopy(config)
+    entries = [e for e in updated.get("custom_databases", []) or [] if e.get("name") != spec.get("name")]
+    updated["custom_databases"] = [*entries, deepcopy(spec)]
+    return updated
+
+
+def remove_custom_database(config: dict[str, Any], name: str) -> dict[str, Any]:
+    updated = deepcopy(config)
+    updated["custom_databases"] = [e for e in updated.get("custom_databases", []) or [] if e.get("name") != name]
+    if not updated["custom_databases"]:
+        updated.pop("custom_databases")
+    return updated
+
+
 def delete_model_entry(config: dict[str, Any], project: str) -> dict[str, Any]:
     return delete_model_entries(config, [project])
 

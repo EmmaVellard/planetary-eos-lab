@@ -205,6 +205,7 @@ def describe_database(database_name: str) -> str:
         f"Database: {db.name}",
         f"File: {db.database_file}",
         f"Description: {db.description}",
+        *([f"WARNING: {db.caveat}"] if db.caveat else []),
         "",
         f"Modeled components/oxides: {', '.join(sorted(active))}",
     ]

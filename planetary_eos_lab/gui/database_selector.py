@@ -6,6 +6,7 @@ from typing import Any
 
 import streamlit as st
 
+from planetary_eos_lab.core.config import DATABASES
 from planetary_eos_lab.core.config_io import save_config_json
 from planetary_eos_lab.core.database_utils import (
     describe_database,
@@ -140,6 +141,9 @@ def show_database_selector(config: dict[str, Any], config_path: Path) -> str:
         key="database_selector",
         help="Choose which thermodynamic database to use for Perple_X calculations",
     )
+
+    if DATABASES[selected].caveat:
+        st.warning(DATABASES[selected].caveat)
 
     # Show database capabilities in expander
     with st.expander(f"Database details: {selected}", expanded=False):

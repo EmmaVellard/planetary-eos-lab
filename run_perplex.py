@@ -112,12 +112,14 @@ HP633_WERAMI_INPUT_SEQUENCE = (
     "1",
     "0",
 )
+FE_S_CORE_WERAMI_INPUT_SEQUENCE = tuple("y" if i == 3 else answer for i, answer in enumerate(HP633_WERAMI_INPUT_SEQUENCE))
 DEFAULT_WERAMI_INPUT_SEQUENCES = {
     "stx21": DEFAULT_WERAMI_INPUT_SEQUENCE,
     "hp633": HP633_WERAMI_INPUT_SEQUENCE,
     "hp636": HP633_WERAMI_INPUT_SEQUENCE,
-    # The Fe-S liquid counts as a fluid: WERAMI asks whether to include it; "n" as in PlanetProfile's core tables.
-    "se15_fes_core": HP633_WERAMI_INPUT_SEQUENCE,
+    # The Fe-S liquid counts as a fluid and WERAMI asks whether to include it: "y", so molten nodes get the
+    # liquid's properties (density and Ks then match PlanetProfile's 95Fe5S_core.tab to 0.01 % and 0.07 %).
+    "se15_fes_core": FE_S_CORE_WERAMI_INPUT_SEQUENCE,
     "dew17_hhph": HP633_WERAMI_INPUT_SEQUENCE,
     "hpha02_hydrous": HP633_WERAMI_INPUT_SEQUENCE,
     "dew13_hydrous": HP633_WERAMI_INPUT_SEQUENCE,
@@ -235,7 +237,8 @@ PHASE_MODES_WITH_FLUID_WERAMI_INPUT_SEQUENCE = ("2", "25", "n", "y", "n", "1", "
 
 
 def phase_modes_sequence_for_database(database: str) -> tuple[str, ...]:
-    if default_werami_sequence_for_database(database) == HP633_WERAMI_INPUT_SEQUENCE:
+    # hp633-style sequences answer WERAMI's "include fluid?" question in 4th position
+    if default_werami_sequence_for_database(database)[3:4] in (("n",), ("y",)):
         return PHASE_MODES_WITH_FLUID_WERAMI_INPUT_SEQUENCE
     return PHASE_MODES_WERAMI_INPUT_SEQUENCE
 
@@ -523,19 +526,48 @@ def write_log(log_path: Path, stdout: str, stderr: str, returncode: int, stdin_t
     )
 
 
+# Seconds after which a Perple_X program is stopped. BUILD and WERAMI only answer prompts, so a long
+# run means they are waiting for an answer the template or the WERAMI sequence does not give (they
+# then loop on the end of the input). VERTEX does the minimization and is not limited.
+# PLANETARY_EOS_PERPLEX_TIMEOUT (seconds) overrides every limit.
+COMMAND_TIMEOUTS_S = {"BUILD": 300, "WERAMI": 1800, "WERAMI phase modes": 1800}
+
+
+def last_prompt(stdout: str) -> str:
+    lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+    prompts = [line for line in lines if line.endswith(("?", ":", "]:")) or "(y/n)" in line.lower()]
+    return prompts[-1] if prompts else (lines[-1] if lines else "")
+
+
 def run_command(executable: Path, stdin_text: str, cwd: Path, log_path: Path, label: str) -> None:
     ensure_executable(executable, label)
-    result = subprocess.run(
-        executable_command(executable),
-        input=stdin_text,
-        text=True,
-        cwd=str(cwd),
-        capture_output=True,
-    )
+    timeout = os.environ.get("PLANETARY_EOS_PERPLEX_TIMEOUT")
+    timeout_s = float(timeout) if timeout else COMMAND_TIMEOUTS_S.get(label)
+    try:
+        result = subprocess.run(
+            executable_command(executable),
+            input=stdin_text,
+            text=True,
+            cwd=str(cwd),
+            capture_output=True,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired as exc:  # subprocess.run has already stopped the program
+        stdout = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        write_log(log_path, stdout[-200000:], stderr[-20000:], -1, stdin_text)
+        raise PipelineError(
+            f"{label} did not finish within {timeout_s:g} s and was stopped. It is probably waiting for an answer "
+            f"that the BUILD template or the WERAMI answers do not give. Last prompt: {last_prompt(stdout)!r}. "
+            f"See {log_path}"
+        ) from None
     write_log(log_path, result.stdout, result.stderr, result.returncode, stdin_text)
 
     if result.returncode != 0:
-        raise PipelineError(f"{label} failed with return code {result.returncode}. See {log_path}")
+        raise PipelineError(
+            f"{label} failed with return code {result.returncode}. Last prompt: {last_prompt(result.stdout)!r}. "
+            f"See {log_path}"
+        )
 
 
 def require_perplex_dir(perplex_dir: Path) -> None:
@@ -919,6 +951,8 @@ def validate_thermodynamic_setup(perplex_dir: Path, model: ModelConfig) -> None:
 
     # Validate PT range consistency (warning only, not fatal)
     db_config = DATABASES[model.database]
+    if db_config.caveat:
+        print(f"WARNING ({model.database}): {db_config.caveat}", file=sys.stderr)
     if "${P_RANGE_BAR}" in model.build_input_file.read_text():
         pt = effective_pt_range(model)
         template_pt = (
@@ -1089,6 +1123,7 @@ def run_werami(perplex_dir: Path, model: ModelConfig) -> Path:
     raw_tab = model.work_dir / f"{model.project}_1.tab"
     if not raw_tab.exists():
         raise FileNotFoundError(f"WERAMI completed but expected table was not found: {raw_tab}")
+    check_werami_grid(raw_tab)
 
     raw_copy = model.output_dir / f"{model.project}_raw_werami.tab"
     shutil.copy2(raw_tab, raw_copy)
@@ -1104,6 +1139,21 @@ def run_werami(perplex_dir: Path, model: ModelConfig) -> Path:
         first_axis=model.planetprofile_first_axis,
     )
     return planetprofile_tab
+
+
+def check_werami_grid(tab_path: Path) -> None:
+    """WERAMI writes the node count of each axis in the header; one node means its answers went wrong."""
+    lines = tab_path.read_text(errors="replace").splitlines()[:12]
+    try:
+        counts = [int(lines[6].split()[0]), int(lines[10].split()[0])]
+    except (IndexError, ValueError):
+        return  # not the usual 2-D header: left to the table validation
+    if min(counts) < 2:
+        raise PipelineError(
+            f"WERAMI wrote a table with {counts[0]} x {counts[1]} nodes ({tab_path}): its answers did not match its "
+            "prompts (for example a grid-size question with sample_on_grid F, or an extra 'include fluid?' question). "
+            "Check werami.log and the werami_input_sequence."
+        )
 
 
 def run_werami_phase_modes(perplex_dir: Path, model: ModelConfig) -> Path:

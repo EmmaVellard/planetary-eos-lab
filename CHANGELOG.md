@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checks, properties along a P–T path, table comparison and resolution convergence.
 - `planetary-eos-selftest`: checks a real Perple_X installation against reference values (Perple_X 7.2.5).
 - `se15_fes_core` database (Saxena & Eriksson 2015) for Fe–S metallic cores, with an Fe-5 wt% S example.
+- GUI form to add or edit a database (*Composition > Thermodynamic Models*); `examples/first_run.py` and the
+  editable study script `examples/my_study.py`.
+- Perple_X runs stop with an error showing the last prompt when BUILD or WERAMI waits for an answer
+  the template does not give (time limit, `PLANETARY_EOS_PERPLEX_TIMEOUT`), and a one-node WERAMI grid is
+  rejected; databases can carry a caveat shown in the GUI and at every run (Fe–S core: checked 4–9 GPa only).
 - `docs/python_api.md`, `docs/planetprofile_usage.md`, `examples/warren_mantle_stx24.py`, `CITATION.cff`.
 
 ### Changed

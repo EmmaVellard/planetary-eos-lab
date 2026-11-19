@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import os
 import signal
 import subprocess
@@ -29,6 +30,8 @@ from planetary_eos_lab.core.config_io import (
     LUNAR_BSM_CATALOGUE_PATH,
     add_missing_model_entries,
     derived_mantle_entry,
+    remove_custom_database,
+    upsert_custom_database,
     DEFAULT_CONFIG_PATH,
     EXAMPLE_CONFIG_PATH,
     copy_example_config,
@@ -1202,7 +1205,135 @@ def thermodynamic_model_catalog_rows() -> list[dict[str, Any]]:
     return rows
 
 
-def show_thermodynamic_model_catalog() -> None:
+def parse_component_pairs(text: str) -> list[list[str]]:
+    """One "source oxide, Perple_X component" pair per line (a single name means both are the same)."""
+    pairs = []
+    for line in text.splitlines():
+        parts = [part.strip() for part in line.replace(";", ",").split(",") if part.strip()]
+        if not parts:
+            continue
+        if len(parts) > 2:
+            raise ValueError(f"Too many fields in component line: {line!r}")
+        pairs.append([parts[0], parts[-1]])
+    return pairs
+
+
+def split_names(text: str) -> list[str]:
+    return [name.strip() for name in text.replace("\n", ",").split(",") if name.strip()]
+
+
+def template_with_file_placeholders(text: str) -> str:
+    """Point a copied template at the form's data files instead of the ones it was written for."""
+    text = re.sub(r"\$\{PERPLEX_DIR\}/datafiles/\S*solution_model\.dat", "${SOLUTION_MODEL_FILE}", text)
+    return re.sub(r"\$\{PERPLEX_DIR\}/datafiles/\S+\.dat", "${THERMODYNAMIC_DATABASE_FILE}", text)
+
+
+def show_custom_database_form(config_path: Path, config: dict[str, Any]) -> None:
+    st.caption(
+        "Declare a Perple_X database that is not built in. It is saved under `custom_databases` in the config, "
+        "with its BUILD template in `build_inputs/`, and then appears in every database menu. "
+        "See `docs/adding_a_database.md`."
+    )
+    base_dir = run_perplex.config_base_dir(config_path)
+    existing = config.get("custom_databases", []) or []
+    choice = st.selectbox(
+        "Database to edit",
+        options=["New database", *[str(e.get("name", "")) for e in existing]],
+        key="custom_db_choice",
+    )
+    current = next((e for e in existing if e.get("name") == choice), {})
+    key = f"custom_db_{choice}"
+    name = st.text_input("Name", value=current.get("name", ""), key=f"{key}_name",
+                         help="Letters, digits and underscores; not the name of a built-in database.")
+    # Perple_X thermodynamic data files are named *ver.dat (solution models and options use other names)
+    datafiles = sorted(p.name for p in (Path(str(config.get("perplex_dir", ""))) / "datafiles").glob("*ver*.dat"))
+    col1, col2 = st.columns(2)
+    with col1:
+        if datafiles:
+            default_file = current.get("database_file", "stx21ver.dat" if "stx21ver.dat" in datafiles else datafiles[0])
+            database_file = st.selectbox("Thermodynamic data file", options=datafiles,
+                                         index=datafiles.index(default_file) if default_file in datafiles else 0,
+                                         key=f"{key}_dbfile")
+        else:
+            database_file = st.text_input("Thermodynamic data file", value=current.get("database_file", ""), key=f"{key}_dbfile")
+    with col2:
+        solution_file = st.text_input("Solution model file", value=current.get("solution_model_file", "solution_model.dat"),
+                                      key=f"{key}_solfile")
+    components_text = st.text_area(
+        "Components, in BUILD order: one `source oxide, Perple_X component` per line",
+        value="\n".join(f"{a}, {b}" for a, b in current.get("components", [])),
+        key=f"{key}_components", height=150,
+        help="An oxide may feed two components (FeO, Fe and FeO, O), as in stx24.",
+    )
+    col3, col4 = st.columns(2)
+    with col3:
+        solution_models = st.text_input("Solution models (comma-separated)", value=", ".join(current.get("solution_models", [])),
+                                        key=f"{key}_models")
+    with col4:
+        excluded = st.text_input("Excluded phases (comma-separated)", value=", ".join(current.get("excluded_phases", [])),
+                                 key=f"{key}_excluded")
+    pt = current.get("pt_range") or {"pressure_bar": {"min": 1000.0, "max": 50000.0}, "temperature_k": {"min": 800.0, "max": 2200.0}}
+    c1, c2, c3, c4 = st.columns(4)
+    p_min = c1.number_input("P min (bar)", value=float(pt["pressure_bar"]["min"]), key=f"{key}_pmin")
+    p_max = c2.number_input("P max (bar)", value=float(pt["pressure_bar"]["max"]), key=f"{key}_pmax")
+    t_min = c3.number_input("T min (K)", value=float(pt["temperature_k"]["min"]), key=f"{key}_tmin")
+    t_max = c4.number_input("T max (K)", value=float(pt["temperature_k"]["max"]), key=f"{key}_tmax")
+    werami = st.text_input(
+        "WERAMI answers after the project name (comma-separated, optional)",
+        value=", ".join(current.get("werami_input_sequence", [])), key=f"{key}_werami",
+        help="Empty: the stx21 answers. Databases with a fluid or liquid add a 'include fluid?' answer (see hp633).",
+    )
+    templates = available_build_templates()
+    current_template = str(current.get("build_template", ""))
+    start = st.selectbox(
+        "Start the BUILD template from", options=templates,
+        index=templates.index(current_template) if current_template in templates else 0, key=f"{key}_template_start",
+    )
+    template_text = st.text_area(
+        "BUILD template (answers to BUILD's prompts; placeholders ${PROJECT}, ${PERPLEX_DIR}, ${PERPLEX_BULK_VALUES}, "
+        "${P_RANGE_BAR}, ${T_RANGE_K}, ${BUILD_TITLE})",
+        value=template_with_file_placeholders((REPO_ROOT / start).read_text(encoding="utf-8")) if (REPO_ROOT / start).exists() else "",
+        key=f"{key}_template_text_{start}", height=320,
+    )
+    description = st.text_input("Description", value=current.get("description", ""), key=f"{key}_description")
+
+    save_col, delete_col = st.columns([1, 1])
+    if save_col.button("Save database to config", type="primary", key=f"{key}_save"):
+        try:
+            if not name.strip() or not name.strip().replace("_", "").isalnum():
+                raise ValueError("The name must use letters, digits and underscores only.")
+            template_rel = f"build_inputs/custom_{name.strip()}.build.in"
+            spec = {
+                "name": name.strip(),
+                "database_file": database_file.strip(),
+                "solution_model_file": solution_file.strip(),
+                "components": parse_component_pairs(components_text),
+                "build_template": template_rel,
+                "solution_models": split_names(solution_models),
+                "excluded_phases": split_names(excluded),
+                "pt_range": {"pressure_bar": {"min": p_min, "max": p_max}, "temperature_k": {"min": t_min, "max": t_max}},
+                "description": description.strip() or f"Custom database {name.strip()}",
+            }
+            if split_names(werami):
+                spec["werami_input_sequence"] = split_names(werami)
+            if not (0 < p_min < p_max and 0 < t_min < t_max):
+                raise ValueError("The P-T range needs 0 < min < max.")
+            if "${PERPLEX_BULK_VALUES}" not in template_text:
+                raise ValueError("The BUILD template must contain ${PERPLEX_BULK_VALUES}.")
+            template_path = base_dir / template_rel
+            template_path.parent.mkdir(parents=True, exist_ok=True)
+            template_path.write_text(template_text.rstrip("\n") + "\n", encoding="utf-8")
+            run_perplex.register_config_databases({"custom_databases": [spec]}, base_dir)  # validates the entry
+            DEFAULT_BUILD_TEMPLATES[spec["name"]] = template_rel
+            write_config(config_path, upsert_custom_database(config, spec))
+        except Exception as exc:  # show any validation problem in the form
+            st.error(f"Not saved: {exc}")
+    if current and delete_col.button(f"Remove {choice} from config", key=f"{key}_delete"):
+        write_config(config_path, remove_custom_database(config, choice))
+        st.info("Removed from the config; its BUILD template file is kept. Reload the page to update the menus.")
+
+
+def show_thermodynamic_model_catalog(config_path: Path | None = None, config: dict[str, Any] | None = None) -> None:
     st.subheader("Thermodynamic Model Catalog")
     st.caption(
         "Use this as a quick guide for choosing the database/template setup before building or running a composition."
@@ -1220,6 +1351,10 @@ def show_thermodynamic_model_catalog() -> None:
         format_func=lambda database: f"{database}: {DATABASES[database].description}",
     )
     st.code(describe_database(selected_database), language="text")
+
+    if config_path is not None and config is not None:
+        with st.expander("Add or edit a database", expanded=False):
+            show_custom_database_form(config_path, config)
 
 
 def single_composition_figure(values: dict[str, float], *, x_title: str) -> go.Figure:
@@ -2138,6 +2273,7 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
 
     st.markdown("**Thermodynamic database for composition fields**")
     database = show_database_selector(config, config_path)
+    st.caption("To add a database that is not listed: *Composition > Thermodynamic Models > Add or edit a database*.")
 
     action_col, source_col = st.columns([1.35, 1])
     with action_col:
@@ -2516,7 +2652,7 @@ def show_composition_page(
         return
 
     if page == COMPOSITION_THERMO_PAGE:
-        show_thermodynamic_model_catalog()
+        show_thermodynamic_model_catalog(config_path, config)
         return
 
     st.warning(f"Unknown composition page `{page}`. Showing Build instead.")

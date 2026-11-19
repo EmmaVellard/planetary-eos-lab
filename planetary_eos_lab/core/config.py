@@ -33,6 +33,8 @@ class ThermodynamicDatabase:
     components: tuple[tuple[str, str], ...] = field(default_factory=tuple)
     build_template: str = ""
     werami_input_sequence: tuple[str, ...] = field(default_factory=tuple)
+    # Shown in the GUI and printed at every run: limits of validity the user must know.
+    caveat: str = ""
 
     def __post_init__(self):
         if not self.pt_range:
@@ -99,6 +101,9 @@ DATABASES = {
         description=(
             "Saxena & Eriksson (2015) Fe-S data set for metallic cores (components Fe and S, wt%), "
             "pyrrhotite and Fe-S liquid; the setup of PlanetProfile's Fe-S core tables"
+        ),
+        caveat=(
+            "Fe-S core tables are checked only between 4 and 9 GPa (against PlanetProfile's Fe-S core tables): results outside this range are not guaranteed. The data set was published for ultra-high pressures (Saxena & Eriksson 2015), and the shear moduli of solid Fe are estimated from a Poisson ratio, not data."
         ),
     ),
     "dew17_hhph": ThermodynamicDatabase(

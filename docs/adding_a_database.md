@@ -3,6 +3,16 @@
 Planetary EOS Lab ships with stx21, stx24, hp633, hp636 and four icy-world setups. Any other
 Perple_X database can be added from `configs/models.json`, without editing the code.
 
+## How a database works here
+
+A database is four things: a Perple_X thermodynamic data file (`*ver.dat`), the solution models
+chosen in it, a BUILD template that answers BUILD's questions (data file, components, P–T range,
+excluded phases, solution models), and the answers given to WERAMI to tabulate the properties. The
+pipeline fills the template with your composition, runs BUILD, VERTEX and WERAMI, and validates the
+table. Built-in databases are defined in `planetary_eos_lab/core/config.py`; yours are declared in the
+config, either with the GUI form (*Composition > Thermodynamic Models > Add or edit a database*) or by
+hand as below.
+
 ## 1. Write a BUILD template
 
 Copy the closest template in `build_inputs/` (for example `lunar_hp633_template.build.in`) and
@@ -66,5 +76,9 @@ planetary-eos-run --config configs/models.json --project my_mantle
 planetary-eos-check-table quality outputs/my_mantle/my_mantle_planetprofile_native.tab
 ```
 
-Look at `outputs/my_mantle/build.log` and `werami.log` the first time: a wrong prompt order shows
-up there as BUILD or WERAMI asking a question the template did not expect.
+Look at `outputs/my_mantle/build.log` and `werami.log` the first time. If the template or the WERAMI
+answers do not match the prompts, Perple_X waits for an answer that never comes: the pipeline stops
+it (after 300 s for BUILD, 1800 s for WERAMI; `PLANETARY_EOS_PERPLEX_TIMEOUT` sets another limit in
+seconds) and the error message shows the last question it asked. A WERAMI table with a single node
+along an axis is also rejected. Check the result with `planetary-eos-check-table quality`, and
+compare it with a table you trust with `planetary-eos-check-table compare`.

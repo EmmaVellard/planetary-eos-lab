@@ -57,6 +57,20 @@ planetary-eos-gui
 
 The app opens in your browser at http://localhost:8501 (it listens on 127.0.0.1 only; `--port` changes the port). Use `configs/models.json` as your local editable config; it is ignored by Git. The published lunar BSM compositions can be added to it from *Composition > Catalog*.
 
+### First Run
+
+```bash
+python examples/first_run.py --perplex-dir /path/to/perplex
+```
+
+Checks the installation, creates `configs/models.json` from the example if you have none, runs the
+first example model on a coarse grid (about 10 s) and prints where the table is.
+
+For your own study without the GUI, copy [examples/my_study.py](examples/my_study.py) and edit its
+"YOUR STUDY" block (database, compositions, crust extraction, oxides to drop, P–T range, grid, a P–T
+path), then run it: compositions, Perple_X, validation, PlanetProfile export and a profile, in
+`outputs/<study name>/`.
+
 ### Verify Your Installation
 
 ```bash
@@ -133,16 +147,17 @@ Do not edit generated files in `compositions/` or `outputs/` as the source of tr
 - Components: Fe and S, entered as `components_wt_percent` (e.g. `{"Fe": 95, "S": 5}`)
 - Solution models: pyrrhotite `Po(SE)` and Fe–S liquid `FeS_liq`; default range 4–9 GPa, 500–2000 K
   (use `pt_range` for other bodies)
-- The same setup as PlanetProfile's `<x>Fe<y>S_core.tab` tables; the liquid is not included in the
-  aggregate properties, as in those tables
+- The same setup as PlanetProfile's `<x>Fe<y>S_core.tab` tables; molten nodes take the properties of
+  the Fe–S liquid (Vs = 0 in the liquid)
 - Database file: `se15ver.dat`. PlanetProfile reads the exported table with `Planet.Core.coreEOS`
   (see [docs/planetprofile_usage.md](docs/planetprofile_usage.md))
-- Limits, checked for Fe-5 wt% S with Perple_X 7.2.5: the Fe–S liquid is stable above about 1260 K at
-  4 GPa and 1120 K at 9 GPa, and the fully liquid nodes (about 5 % of the default grid) are NaN; the
-  shear moduli of solid Fe (FeBCC, FeSIV) are not in the data set and WERAMI estimates them from a
-  Poisson ratio of 0.35, so Vs and Gs are not data. The table differs from PlanetProfile's
-  `95Fe5S_core.tab` (made with Perple_X 6.6.6, no liquid anywhere) by 4.6 % in density and 9.5 % in
-  the moduli on average. `phase_modes` shows the liquid fraction.
+- Checked for Fe-5 wt% S with Perple_X 7.2.5 against PlanetProfile's `95Fe5S_core.tab` (Perple_X
+  6.6.6): density and Ks agree to 0.01 % and 0.07 % on average over the grid. Shear differs: the
+  liquid (above about 1260 K at 4 GPa and 1120 K at 9 GPa for Fe-5 wt% S) has Gs = 0 here, while the
+  6.6.6 table gives it a modulus estimated from a Poisson ratio. The shear moduli of solid Fe (FeBCC,
+  FeSIV) are not in the data set either; WERAMI estimates them from a Poisson ratio of 0.35, so Vs and
+  Gs of the core are not data. The data set was published for ultra-high pressures (Saxena & Eriksson
+  2015, "Thermodynamics of Fe-S at ultra-high pressure"). `phase_modes` shows the liquid fraction.
 
 **hp633** - Holland & Powell 2011 (v6.33)
 - Modeled oxides: Na2O, MgO, Al2O3, SiO2, K2O, CaO, TiO2, FeO

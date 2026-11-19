@@ -30,8 +30,9 @@ def test_fe5s_core_build_input_matches_the_planetprofile_setup(tmp_path: Path) -
 
 
 def test_core_werami_answers_skip_the_liquid_and_the_default_grid_is_sampled() -> None:
-    # The Fe-S liquid makes WERAMI ask whether to include fluids: the answer after "1" must be "n".
-    assert run_perplex.default_werami_sequence_for_database("se15_fes_core")[:4] == ("2", "38", "1", "n")
+    # The Fe-S liquid makes WERAMI ask whether to include fluids: "y", so molten nodes get liquid properties.
+    assert run_perplex.default_werami_sequence_for_database("se15_fes_core") == (
+        "2", "38", "1", "y", "2", "13", "14", "3", "4", "10", "11", "0", "n", "1", "0")
     # With sample_on_grid F, WERAMI asks for grid nodes, which the default answers do not provide.
     assert run_perplex.DEFAULT_PERPLEX_OPTIONS.sample_on_grid is True
     assert "sample_on_grid T" in run_perplex.render_perplex_option_text()
@@ -41,3 +42,13 @@ def test_phase_mode_answers_include_the_fluid_question_where_werami_asks_it() ->
     assert run_perplex.phase_modes_sequence_for_database("stx24") == ("2", "25", "n", "n", "1", "0")
     for database in ("hp633", "hp636", "se15_fes_core"):
         assert run_perplex.phase_modes_sequence_for_database(database) == ("2", "25", "n", "y", "n", "1", "0")
+
+
+def test_fe_s_core_carries_its_pressure_warning(tmp_path, capsys) -> None:
+    from planetary_eos_lab.core.config import DATABASES
+    from planetary_eos_lab.core.database_utils import describe_database
+
+    caveat = DATABASES["se15_fes_core"].caveat
+    assert "between 4 and 9 GPa" in caveat and "not guaranteed" in caveat
+    assert f"WARNING: {caveat}" in describe_database("se15_fes_core")
+    assert DATABASES["stx21"].caveat == ""
