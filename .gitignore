@@ -40,6 +40,8 @@ MIGRATION_GUIDE.md
 docs/*
 !docs/icy_worlds_guide.md
 !docs/adding_a_database.md
+!docs/python_api.md
+!docs/planetprofile_usage.md
 .jobs/
 fits/
 fits_plots/
@@ -73,3 +75,7 @@ htmlcov/
 
 # macOS
 .DS_Store
+
+# Local Claude Code files
+.claude/
+CLAUDE.md

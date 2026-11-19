@@ -12,7 +12,7 @@ The included Moon near-side/far-side models are example smoke tests. They are us
 
 ### Prerequisites
 - Python 3.10 or later
-- [Perple_X](https://github.com/jadconnolly/Perple_X) installed locally
+- [Perple_X](https://github.com/jadconnolly/Perple_X) installed locally (tested with Perple_X 7.2.5, June 2026)
 - Docker (optional, for containerized usage)
 
 ### Quick Install
@@ -55,7 +55,19 @@ planetary-eos-gui
    - In the GUI: Step 1 → enter your Perple_X directory path → Save
    - Or edit `configs/models.json` and set `"perplex_dir": "/path/to/perplex"`
 
-The app opens in your browser at http://localhost:8501. Use `configs/models.json` as your local editable config; it is ignored by Git.
+The app opens in your browser at http://localhost:8501 (it listens on 127.0.0.1 only; `--port` changes the port). Use `configs/models.json` as your local editable config; it is ignored by Git. The published lunar BSM compositions can be added to it from *Composition > Catalog*.
+
+### Verify Your Installation
+
+```bash
+planetary-eos-selftest --perplex-dir /path/to/perplex
+```
+
+It checks Python and the dependencies, the Perple_X executables and version, the data files of every
+database, then runs a small stx21 model through BUILD, VERTEX and WERAMI (about 5 s) and compares
+density and velocities at three nodes with reference values computed with Perple_X 7.2.5 (1 %
+tolerance). Every check prints PASS, WARN or FAIL; the command exits with 1 if one fails. With
+`PERPLEX_DIR` set, `pytest` runs the same test.
 
 ### Docker Installation (Alternative)
 
@@ -112,6 +124,11 @@ Do not edit generated files in `compositions/` or `outputs/` as the source of tr
 - Database files: `stx24ver.dat`, `stx24_solution_model.dat`
 - The template was reconstructed in November 2026; tables rebuilt with it differ from the August 2026 lunar tables on about 5 % of the nodes (median relative difference 1e-5)
 
+**hp636** - Holland & Powell data set v6.36
+- Same components, solution models and excluded phases as hp633 (checked with a real BUILD)
+- Use it for Ti-bearing compositions; add `"excluded_oxides": ["TiO2"]` to a model for a Ti-free control
+- Database file: `hp636ver.dat`
+
 **hp633** - Holland & Powell 2011 (v6.33)
 - Modeled oxides: Na2O, MgO, Al2O3, SiO2, K2O, CaO, TiO2, FeO
 - Source-only oxide in the default profile: P2O5
@@ -119,6 +136,10 @@ Do not edit generated files in `compositions/` or `outputs/` as the source of tr
 - Best for: Compositions requiring TiO2 or K2O
 - Database file: `hp633ver.dat`
 - Solution model file: `solution_model.dat`
+
+**Your own database**: declare it under `custom_databases` in `configs/models.json`, with its data
+files, components and BUILD template; no code change is needed. See
+[docs/adding_a_database.md](docs/adding_a_database.md).
 
 ### Selecting a Database
 
@@ -157,6 +178,20 @@ See `configs/icy_worlds.example.json` for first-pass CI, CM, CV, cometary, Ganym
 - Composition data sources and references
 - Troubleshooting common issues
 
+## Model Options
+
+Options of a model entry in `configs/models.json`, besides the composition and the database:
+
+| Option | Effect |
+| --- | --- |
+| `mantle_extraction` | `{"crust_oxides_wt_percent": {...}, "crust_mass_fraction": f, "crust_source": "..."}`: the mantle left after extracting the crust, X_mantle = (X_bulk − f·X_crust)/(1 − f), recorded in the composition file. Also in the GUI: *Composition > Build > Derive a mantle by crust extraction*. |
+| `excluded_oxides` | oxides removed before normalization (e.g. `["TiO2"]`), recorded in the composition file |
+| `pt_range` | `{"pressure_bar": {"min", "max"}, "temperature_k": {"min", "max"}}`, replacing the database range (lunar templates) |
+| `phase_modes` | `true` writes `<project>_phase_modes.tab`, the volume % of every phase on the same grid (also `planetary-eos-run --phase-modes`) |
+| `perplex_options` | grid resolution (`x_nodes`, `y_nodes`, `grid_levels`, ...) |
+
+`configs/models.example.json` includes a low-temperature example (stx24, 300–900 K, 0.1–1.3 GPa, phase modes).
+
 ## Command Line Interface
 
 After installation, all functionality is available via command-line tools:
@@ -181,17 +216,43 @@ planetary-eos-export --config configs/models.json --planetprofile-export-dir out
 
 # Generate comparison plots
 planetary-eos-plot --config configs/models.json --output-dir outputs/plots
+
+# Check a table: quality, P-T domain, comparison of two tables, resolution convergence
+planetary-eos-check-table quality outputs/my_project/my_project_planetprofile_native.tab
+planetary-eos-check-table domain my_table.tab --p-bar 10000 40000 --t-k 1200 1600
+planetary-eos-check-table compare stx21_table.tab stx24_table.tab
+planetary-eos-check-table convergence coarse.tab fine.tab --json
+
+# Check the installation
+planetary-eos-selftest --perplex-dir /path/to/perplex
 ```
+
+## Python Without the GUI
+
+Every step is a Python function: compositions (`make_compositions`), Perple_X runs
+(`run_perplex.load_config`, `run_perplex.run_model`), export (`export_planetprofile`) and table
+tools (`planetary_eos_lab.analysis`: quality, validity masks, domain checks, properties along a
+P–T path, comparisons). [examples/warren_mantle_stx24.py](examples/warren_mantle_stx24.py) goes from
+a published bulk composition to a mantle, a stx24 table and a profile in about 6 s on a coarse grid;
+[docs/python_api.md](docs/python_api.md) lists the functions.
+
+## Using the Tables in PlanetProfile
+
+See [docs/planetprofile_usage.md](docs/planetprofile_usage.md). Every export writes
+`planetprofile_export_manifest.json` with the EoS Lab commit, the Perple_X version, the sha256 of
+each table and of its BUILD template, and no local absolute path, so a table can be cited and rebuilt.
 
 Legacy scripts at the repository root (`run_perplex.py`, `make_compositions.py`, etc.) still work for backward compatibility.
 
 ## Tests
 
-Tests use fake Perple_X executables, so real Perple_X is not required:
+Tests use fake Perple_X executables, so real Perple_X is not required; the real-Perple_X test
+runs only when `PERPLEX_DIR` is set:
 
 ```bash
 pip install -e ".[dev]"
 pytest
+PERPLEX_DIR=/path/to/perplex pytest
 ```
 
 ## Contributing
@@ -208,7 +269,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Citation
 
-If you use this software in your research, please cite:
+If you use this software in your research, please cite it (see [CITATION.cff](CITATION.cff); GitHub shows it under "Cite this repository"):
 
 ```bibtex
 @software{planetary_eos_lab,

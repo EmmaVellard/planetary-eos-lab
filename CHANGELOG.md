@@ -12,10 +12,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tracked BSM catalogue `configs/lunar_bsm_models.json` with `composition_class` and `study_role`.
 - GUI run history kept on disk (`.jobs/`), with status, exit codes and a kill button.
 - `docs/icy_worlds_guide.md` is now tracked (the README linked to it).
+- hp636 database (Holland & Powell v6.36) and the `excluded_oxides` model option (e.g. a Ti-free control).
+- Databases declared in the config (`custom_databases`), with `docs/adding_a_database.md`.
+- `mantle_extraction`: mantle after extracting a crust by mass balance, in the config and in the GUI
+  (*Composition > Build*); "Add the published lunar BSMs" in *Composition > Catalog*.
+- `pt_range` per model and `phase_modes` (second WERAMI pass, `<project>_phase_modes.tab`).
+- `planetary_eos_lab.analysis` and `planetary-eos-check-table`: table quality, validity masks, P–T domain
+  checks, properties along a P–T path, table comparison and resolution convergence.
+- `planetary-eos-selftest`: checks a real Perple_X installation against reference values (Perple_X 7.2.5).
+- `docs/python_api.md`, `docs/planetprofile_usage.md`, `examples/warren_mantle_stx24.py`, `CITATION.cff`.
 
 ### Changed
 - `validate_tab.py` accepts up to 0.15 % non-finite values in large tables (was 0.1 %).
 - Component status shows an oxide split into several components (FeO -> Fe + O).
+- Export manifest schema 3: EoS Lab commit and dirty flag, Perple_X version, sha256 of tables and BUILD
+  templates, no local absolute paths.
+- `planetary-eos-gui` runs Streamlit with the current Python, so it works without an activated venv.
+- `--database` accepts any registered database; lunar BUILD templates take their P–T range from
+  `${P_RANGE_BAR}` and `${T_RANGE_K}`.
+- numpy is a declared dependency.
 
 ## [1.0] - 2026-07-01
 

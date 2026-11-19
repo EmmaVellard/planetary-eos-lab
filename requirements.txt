@@ -5,6 +5,7 @@ streamlit>=1.39.0,<2.0.0
 pandas>=2.0.0,<3.0.0
 openpyxl>=3.1.0,<4.0.0
 plotly>=5.18.0,<6.0.0
+numpy>=1.24
 
 # Note: This workbench is a Python interface to Perple_X.
 # You must install Perple_X separately from https://github.com/jadconnolly/Perple_X
