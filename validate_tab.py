@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from functools import lru_cache
 import re
 import sys
 from dataclasses import dataclass
@@ -121,6 +122,8 @@ def find_header_line(lines: list[str]) -> tuple[int, list[str]] | None:
         tokens = line.split()
         if len(tokens) < 3:
             continue
+        if best is not None and parse_numeric_row(tokens, len(tokens)) is not None:
+            break  # the data rows have started: no header below (scanning them cost ~1 s per 90 000-row table)
         score = header_score(tokens)
         if score < 3:
             continue
@@ -132,7 +135,15 @@ def find_header_line(lines: list[str]) -> tuple[int, list[str]] | None:
 
 
 def read_tab(tab_path: Path) -> TabData:
-    lines = tab_path.read_text(errors="replace").splitlines()
+    """Read a table; the result is cached by path, size and modification time. Do not modify it in place."""
+    tab_path = Path(tab_path)
+    stat = tab_path.stat()
+    return _read_tab_cached(str(tab_path.resolve()), stat.st_size, stat.st_mtime_ns)
+
+
+@lru_cache(maxsize=8)  # the GUI rereads the same tables at every click; 8 full tables is ~150 MB at most
+def _read_tab_cached(tab_path: str, size: int, mtime_ns: int) -> TabData:
+    lines = Path(tab_path).read_text(errors="replace").splitlines()
     header = find_header_line(lines)
     if header is None:
         raise ValueError("Could not find a table header with required property columns.")

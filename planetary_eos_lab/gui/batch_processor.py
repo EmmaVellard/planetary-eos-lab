@@ -141,7 +141,7 @@ def show_batch_workspace(config_path: Path, config: dict[str, Any], models: list
                     }
                     for m in sweep_models
                 ]
-                st.dataframe(preview_data, use_container_width=True, hide_index=True)
+                st.dataframe(preview_data, width="stretch", hide_index=True)
 
             # Validation check
             invalid_count = sum(1 for m in sweep_models if not validate_model_entry(m).ok)
@@ -155,7 +155,7 @@ def show_batch_workspace(config_path: Path, config: dict[str, Any], models: list
     # Add batch to config
     st.divider()
     if sweep_models:
-        if st.button("➕ Add batch to config", type="primary", use_container_width=True):
+        if st.button("➕ Add batch to config", type="primary", width="stretch"):
             if "models" not in config:
                 config["models"] = []
 
@@ -206,7 +206,7 @@ def show_batch_workspace(config_path: Path, config: dict[str, Any], models: list
         )
         if not projects_to_run:
             st.info("Select at least one batch model to run.")
-        if st.button("Run selected batch model(s)", disabled=not projects_to_run, use_container_width=True):
+        if st.button("Run selected batch model(s)", disabled=not projects_to_run, width="stretch"):
             from planetary_eos_lab.gui.streamlit_app import relabel_command, run_streamlit_commands
 
             commands = [
@@ -281,7 +281,7 @@ def show_batch_results_matrix(models: list[dict[str, Any]], config_path: Path, v
             }
         )
 
-    st.dataframe(results, use_container_width=True, hide_index=True)
+    st.dataframe(results, width="stretch", hide_index=True)
 
     # Summary statistics
     if results:

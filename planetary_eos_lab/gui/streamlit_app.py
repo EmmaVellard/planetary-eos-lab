@@ -134,11 +134,12 @@ COMPOSITION_BUILD_PAGE = "Build"
 COMPOSITION_CATALOG_PAGE = "Catalog"
 COMPOSITION_BATCH_PAGE = "Batch Processing"
 COMPOSITION_THERMO_PAGE = "Thermodynamic Models"
+# Workflow order: choose or declare the database, then build, batch and review compositions.
 COMPOSITION_PAGES = [
+    COMPOSITION_THERMO_PAGE,
     COMPOSITION_BUILD_PAGE,
     COMPOSITION_BATCH_PAGE,
     COMPOSITION_CATALOG_PAGE,
-    COMPOSITION_THERMO_PAGE,
 ]
 
 
@@ -2068,6 +2069,46 @@ def show_streamlit_command_job() -> None:
         st.rerun()
 
 
+def job_created_files(job: dict[str, Any], repo_root: Path = REPO_ROOT, limit: int = 300) -> list[dict[str, Any]]:
+    """Files written by a run: in the folders its commands name, modified between its start and last update."""
+    try:
+        start = time.mktime(time.strptime(str(job.get("start_time", "")), "%Y%m%d-%H%M%S"))
+    except ValueError:
+        return []
+    try:
+        end = time.mktime(time.strptime(str(job.get("last_update", "")), "%Y%m%d-%H%M%S")) + 60
+    except ValueError:
+        end = time.time()
+    if job.get("status") == "running":
+        end = time.time()
+    folders: set[Path] = set()
+    for command in job.get("commands", []):
+        args = [str(a) for a in command.get("command", [])]
+        for flag, value in zip(args, args[1:]):
+            if flag == "--project":
+                folders.add(repo_root / "outputs" / value)
+            elif flag in ("--planetprofile-export-dir", "--output-dir", "--outdir"):
+                folders.add(Path(value))
+        if any(Path(a).name in ("make_compositions.py", "run_full_pipeline.py") for a in args):
+            folders.add(repo_root / "compositions")
+    rows = []
+    log_path = Path(str(job.get("log_path", "")))
+    candidates = [log_path] if log_path.is_file() else []
+    for folder in sorted(folders):
+        if folder.is_dir():
+            candidates.extend(path for path in folder.rglob("*") if path.is_file())
+    for path in candidates:
+        modified = path.stat().st_mtime
+        if start - 1 <= modified <= end:
+            try:
+                shown = path.relative_to(repo_root).as_posix()
+            except ValueError:
+                shown = str(path)
+            rows.append({"file": shown, "size (kB)": round(path.stat().st_size / 1024, 1),
+                         "modified": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(modified))})
+    return sorted(rows, key=lambda row: row["file"])[:limit]
+
+
 def show_persistent_jobs() -> None:
     """Show local run history from disk."""
     jobs = reconciled_persistent_jobs()
@@ -2103,6 +2144,12 @@ def show_persistent_jobs() -> None:
             log_path = Path(str(job.get("log_path", "")))
             if log_path.exists():
                 st.caption(f"**Log:** `{log_path}`")
+            created = job_created_files(job)
+            if created:
+                st.caption(f"**Files written by this run ({len(created)}):**")
+                st.dataframe(created, hide_index=True, width="stretch")
+            elif status != "running":
+                st.caption("**Files written by this run:** none found (they may have been moved or overwritten since).")
 
             if status == "running":
                 if st.button("Kill Run", key=f"kill_job_{job_id}", type="primary"):
@@ -2579,7 +2626,7 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
                         {row["component"]: round(row["normalized to 100 wt%"], 2) for row in rows},
                         x_title="Component",
                     ),
-                    use_container_width=True,
+                    width="stretch",
                 )
         else:
             rows = oxide_table_rows(edited, database=database) if validation.ok else []
@@ -2597,7 +2644,7 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
                         {row["oxide"]: round(row["normalized_wt_percent"], 2) for row in plot_rows},
                         x_title="Oxide",
                     ),
-                    use_container_width=True,
+                    width="stretch",
                 )
     with guardrail_col:
         if validation.ok:
@@ -2751,9 +2798,9 @@ def show_selected_comparison_plots(config_path: Path, models: list[dict[str, Any
     try:
         config = run_perplex.load_config(config_path)
         plot_models = plot_comparisons.selected_plot_models(config, projects_to_plot)
-        st.plotly_chart(composition_comparison_figure(plot_models), use_container_width=True)
+        st.plotly_chart(composition_comparison_figure(plot_models), width="stretch")
         try:
-            st.plotly_chart(property_comparison_figure(plot_models), use_container_width=True)
+            st.plotly_chart(property_comparison_figure(plot_models), width="stretch")
         except (FileNotFoundError, ValueError) as exc:
             st.info(f"Property comparison plot is unavailable for this selection: {exc}")
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
@@ -2970,7 +3017,7 @@ def main() -> None:
     if st.session_state.get("workspace_mode") == LEGACY_COMPOSITION_BUILDER_MODE:
         st.session_state["workspace_mode"] = COMPOSITION_BUILDER_MODE
     if "composition_page_index" not in st.session_state:
-        set_composition_page(0)
+        set_composition_page(COMPOSITION_PAGES.index(COMPOSITION_BUILD_PAGE))  # land on Build, not on the reference page
     else:
         set_composition_page(int(st.session_state.get("composition_page_index", 0)))
     if st.session_state.get("workspace_mode") == BATCH_PROCESSING_MODE:
@@ -3256,7 +3303,7 @@ def main() -> None:
                 file_name=model_definitions_export_filename(projects_to_export) if projects_to_export else "model_definitions.json",
                 mime="application/json",
                 disabled=not projects_to_export,
-                use_container_width=True,
+                width="stretch",
             )
 
             st.divider()

@@ -60,7 +60,7 @@ def show_output_files(output_dir: Path, project: str) -> None:
         size = f"{path.stat().st_size:,} bytes" if exists else "—"
         rows.append({"File": label, "Path": str(path.relative_to(output_dir.parent)), "Exists": "✓" if exists else "✗", "Size": size})
 
-    st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.dataframe(rows, width="stretch", hide_index=True)
 
 
 def show_composition_comparison(models: list[dict[str, Any]], selected_project: Optional[str] = None) -> None:
