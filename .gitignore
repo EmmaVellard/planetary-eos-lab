@@ -43,12 +43,13 @@ docs/*
 !docs/python_api.md
 !docs/planetprofile_usage.md
 .jobs/
-fits/
-fits_plots/
-fits*
-plot_fits*.py
-comparison_plots/
-compare*
+/fits/
+/fits_plots/
+/fits*
+/plot_fits*.py
+/comparison_plots/
+# root analysis scripts only (planetary_eos_lab/analysis/compare.py is source)
+/compare*
 
 # Python
 __pycache__/
