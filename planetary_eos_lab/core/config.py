@@ -86,6 +86,21 @@ DATABASES = {
             "use it for Ti-bearing compositions (with excluded_oxides for a Ti-free control)"
         ),
     ),
+    "se15_fes_core": ThermodynamicDatabase(
+        name="se15_fes_core",
+        database_file="se15ver.dat",
+        solution_model_file="solution_model.dat",
+        excluded_phases=(),
+        solution_models=("Po(SE)", "FeS_liq"),
+        pt_range={
+            "pressure_bar": {"min": 40000.0, "max": 90000.0},
+            "temperature_k": {"min": 500.0, "max": 2000.0},
+        },
+        description=(
+            "Saxena & Eriksson (2015) Fe-S data set for metallic cores (components Fe and S, wt%), "
+            "pyrrhotite and Fe-S liquid; the setup of PlanetProfile's Fe-S core tables"
+        ),
+    ),
     "dew17_hhph": ThermodynamicDatabase(
         name="dew17_hhph",
         database_file="dew17hp622ver_elements.dat",

@@ -68,6 +68,13 @@ def get_database_components(database_name: str) -> tuple[tuple[str, str], ...]:
             ("H2O", "H2O"),
         )
 
+    elif database_name == "se15_fes_core":
+        # Metallic core: Fe-S binary, entered as components_wt_percent {"Fe": ..., "S": ...}
+        return (
+            ("S", "S"),
+            ("Fe", "Fe"),
+        )
+
     elif database_name == "dew17_hhph":
         # DEW17 element-based database - includes transition metals
         return (

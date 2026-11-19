@@ -23,6 +23,15 @@ name. To use a table made with Planetary EOS Lab:
    Planet.Sil.mantleEOS = 'my_mantle_PerpleX.tab'
    ```
 
+   A core table (database `se15_fes_core`) is named the same way in the core settings:
+
+   ```python
+   Planet.Core.coreEOS = 'Fe95S5_core_PerpleX.tab'
+   ```
+
+   PlanetProfile treats a file whose name contains `3D_EOS` as a 3-D Fe–S stack interpolated in
+   wFe; a single-composition table must not contain `3D_EOS` in its name.
+
 4. Keep the manifest with your results. It records the EoS Lab commit (and whether the code had
    uncommitted changes), the Perple_X version, the database, solution models, excluded phases, P–T
    range and grid, the composition and its provenance, and the sha256 of the table and of its BUILD

@@ -87,6 +87,21 @@
       "composition_interpretation": "Low-temperature diagnostic of a bulk silicate Moon composition; not a crust composition.",
       "literature_proxy": true,
       "source_note": "Warren, P. H. (2005). \"New\" lunar meteorites: Implications for composition of the global lunar surface, lunar crust, and the bulk Moon. Meteoritics & Planetary Science, 40(3), 477-506. DOI: 10.1111/j.1945-5100.2005.tb00395.x. Table 6 row 'Same, excluding 1.2 wt% core'. Machine-readable transformation record is in the source_transformation block below."
+    },
+    {
+      "project": "fe95s5_core_example",
+      "description": "Example: Fe-5 wt% S metallic core with the Saxena & Eriksson (2015) data set, the setup of PlanetProfile's 95Fe5S_core table",
+      "database": "se15_fes_core",
+      "components_wt_percent": {
+        "Fe": 95.0,
+        "S": 5.0
+      },
+      "planetprofile_filename": "Fe95S5_core_PerpleX.tab",
+      "scientific_status": "user_defined",
+      "model_scope": "metallic_core",
+      "planetprofile_readiness": "not_assessed_for_planetprofile_science",
+      "composition_interpretation": "Binary Fe-S core (Ni, P, C omitted); the Fe-S liquid is not included in the aggregate properties, as in PlanetProfile's core tables.",
+      "literature_proxy": false
     }
   ]
 }

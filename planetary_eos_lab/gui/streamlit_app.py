@@ -537,7 +537,7 @@ def show_oxide_table(rows: list[dict[str, Any]], database: str = "stx21") -> Non
 
 @dataclass(frozen=True)
 class GuiPerplexOptions:
-    sample_on_grid: bool = False
+    sample_on_grid: bool = True
     x_nodes: tuple[int, int] = (40, 300)
     y_nodes: tuple[int, int] = (40, 300)
     grid_levels: tuple[int, int] = (1, 4)

@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `planetary_eos_lab.analysis` and `planetary-eos-check-table`: table quality, validity masks, P–T domain
   checks, properties along a P–T path, table comparison and resolution convergence.
 - `planetary-eos-selftest`: checks a real Perple_X installation against reference values (Perple_X 7.2.5).
+- `se15_fes_core` database (Saxena & Eriksson 2015) for Fe–S metallic cores, with an Fe-5 wt% S example.
 - `docs/python_api.md`, `docs/planetprofile_usage.md`, `examples/warren_mantle_stx24.py`, `CITATION.cff`.
 
 ### Changed
@@ -31,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--database` accepts any registered database; lunar BUILD templates take their P–T range from
   `${P_RANGE_BAR}` and `${T_RANGE_K}`.
 - numpy is a declared dependency.
+- `sample_on_grid` now defaults to true (pipeline and GUI): with false, WERAMI asks for grid nodes that the
+  default answers do not provide, and the run never ends.
 
 ## [1.0] - 2026-07-01
 

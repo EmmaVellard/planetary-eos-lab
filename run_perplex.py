@@ -24,6 +24,7 @@ DEFAULT_BUILD_TEMPLATES = {
     "stx24": BASE_DIR / "build_inputs" / "lunar_stx24_template.build.in",
     "hp633": BASE_DIR / "build_inputs" / "lunar_hp633_template.build.in",
     "hp636": BASE_DIR / "build_inputs" / "lunar_hp636_template.build.in",
+    "se15_fes_core": BASE_DIR / "build_inputs" / "core_se15_fes_template.build.in",
     "dew17_hhph": BASE_DIR / "build_inputs" / "icy_dew17_hhph_template.build.in",
     "hpha02_hydrous": BASE_DIR / "build_inputs" / "icy_hpha02_hydrous_simple_template.build.in",
     "dew13_hydrous": BASE_DIR / "build_inputs" / "icy_dew13_hydrous_template.build.in",
@@ -34,7 +35,7 @@ COMPONENT_COMPOSITION_ALIASES = {"perplex_components", "components", "elements",
 
 @dataclass(frozen=True)
 class PerplexOptions:
-    sample_on_grid: bool = False
+    sample_on_grid: bool = True  # False makes WERAMI ask for grid nodes, which the default answers do not give
     x_nodes: tuple[int, int] = (40, 300)
     y_nodes: tuple[int, int] = (40, 300)
     grid_levels: tuple[int, int] = (1, 4)
@@ -115,6 +116,8 @@ DEFAULT_WERAMI_INPUT_SEQUENCES = {
     "stx21": DEFAULT_WERAMI_INPUT_SEQUENCE,
     "hp633": HP633_WERAMI_INPUT_SEQUENCE,
     "hp636": HP633_WERAMI_INPUT_SEQUENCE,
+    # The Fe-S liquid counts as a fluid: WERAMI asks whether to include it; "n" as in PlanetProfile's core tables.
+    "se15_fes_core": HP633_WERAMI_INPUT_SEQUENCE,
     "dew17_hhph": HP633_WERAMI_INPUT_SEQUENCE,
     "hpha02_hydrous": HP633_WERAMI_INPUT_SEQUENCE,
     "dew13_hydrous": HP633_WERAMI_INPUT_SEQUENCE,
@@ -223,8 +226,18 @@ class ModelConfig:
     phase_modes: bool = False  # second WERAMI pass: volume modes of all phases
 
 
-# WERAMI answers after the project name for a 2-D grid of the modes of all phases (mode 25).
+# WERAMI answers after the project name for a 2-D grid of the modes of all phases (mode 25):
+# no cumulative modes, keep the variable range, the default grid. Databases with a fluid or a
+# liquid model (the hp633-style sequences) add the question "include fluid?", answered "y" so that
+# the fluid or melt fraction appears in the table.
 PHASE_MODES_WERAMI_INPUT_SEQUENCE = ("2", "25", "n", "n", "1", "0")
+PHASE_MODES_WITH_FLUID_WERAMI_INPUT_SEQUENCE = ("2", "25", "n", "y", "n", "1", "0")
+
+
+def phase_modes_sequence_for_database(database: str) -> tuple[str, ...]:
+    if default_werami_sequence_for_database(database) == HP633_WERAMI_INPUT_SEQUENCE:
+        return PHASE_MODES_WITH_FLUID_WERAMI_INPUT_SEQUENCE
+    return PHASE_MODES_WERAMI_INPUT_SEQUENCE
 
 
 @dataclass(frozen=True)
@@ -1099,7 +1112,7 @@ def run_werami_phase_modes(perplex_dir: Path, model: ModelConfig) -> Path:
     before = set(model.work_dir.glob(f"{model.project}_*.tab"))
     run_command(
         executable=executable_path(perplex_dir, "werami"),
-        stdin_text=f"{model.project}\n" + "\n".join(PHASE_MODES_WERAMI_INPUT_SEQUENCE) + "\n",
+        stdin_text=f"{model.project}\n" + "\n".join(phase_modes_sequence_for_database(model.database)) + "\n",
         cwd=model.work_dir,
         log_path=model.output_dir / "werami_phase_modes.log",
         label="WERAMI phase modes",

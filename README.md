@@ -129,6 +129,21 @@ Do not edit generated files in `compositions/` or `outputs/` as the source of tr
 - Use it for Ti-bearing compositions; add `"excluded_oxides": ["TiO2"]` to a model for a Ti-free control
 - Database file: `hp636ver.dat`
 
+**se15_fes_core** - Saxena & Eriksson (2015) Fe–S data set, for metallic cores
+- Components: Fe and S, entered as `components_wt_percent` (e.g. `{"Fe": 95, "S": 5}`)
+- Solution models: pyrrhotite `Po(SE)` and Fe–S liquid `FeS_liq`; default range 4–9 GPa, 500–2000 K
+  (use `pt_range` for other bodies)
+- The same setup as PlanetProfile's `<x>Fe<y>S_core.tab` tables; the liquid is not included in the
+  aggregate properties, as in those tables
+- Database file: `se15ver.dat`. PlanetProfile reads the exported table with `Planet.Core.coreEOS`
+  (see [docs/planetprofile_usage.md](docs/planetprofile_usage.md))
+- Limits, checked for Fe-5 wt% S with Perple_X 7.2.5: the Fe–S liquid is stable above about 1260 K at
+  4 GPa and 1120 K at 9 GPa, and the fully liquid nodes (about 5 % of the default grid) are NaN; the
+  shear moduli of solid Fe (FeBCC, FeSIV) are not in the data set and WERAMI estimates them from a
+  Poisson ratio of 0.35, so Vs and Gs are not data. The table differs from PlanetProfile's
+  `95Fe5S_core.tab` (made with Perple_X 6.6.6, no liquid anywhere) by 4.6 % in density and 9.5 % in
+  the moduli on average. `phase_modes` shows the liquid fraction.
+
 **hp633** - Holland & Powell 2011 (v6.33)
 - Modeled oxides: Na2O, MgO, Al2O3, SiO2, K2O, CaO, TiO2, FeO
 - Source-only oxide in the default profile: P2O5
@@ -254,6 +269,18 @@ pip install -e ".[dev]"
 pytest
 PERPLEX_DIR=/path/to/perplex pytest
 ```
+
+## Future Work
+
+- **Solidus and melt fraction.** The mantle tables are computed without a silicate liquid, so a
+  node hotter than the solidus of its composition is not physical (it should contain melt). Planned:
+  compute the dry solidus T(P) of each composition with Perple_X and a melt model (for example
+  `Melt(JH)`, Jennings & Holland 2015, J. Petrol. 56, 869–892), flag the table nodes above it, and
+  report the melt fraction there. Even a small melt fraction lowers Vs strongly and raises tidal
+  dissipation, so it matters for seismic and tidal forward models.
+- **Fe–S core tables in 3-D.** One core table per composition is supported (database
+  `se15_fes_core`); stacking several Fe–S compositions into the `Fe-S_3D_EOS*.mat` file PlanetProfile
+  interpolates in wFe would need scipy.
 
 ## Contributing
 
