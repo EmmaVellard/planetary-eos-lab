@@ -397,6 +397,7 @@ def write_composition(
         "literature_proxy": model.literature_proxy,
         "source_note": model.source_note,
         "source_transformation": getattr(model, "_source_transformation", None),
+        "excluded_oxides": getattr(model, "_excluded_oxides", None),
         "mg_number_recomputed_mol_percent": _recompute_mg_number(normalized),
         "perplex_build": build_metadata,
         "default_perplex_build": build_metadata,
@@ -668,6 +669,13 @@ def model_from_config_entry(
     project = entry.get("project")
     if not project:
         raise ValueError("Each inline composition model must define a project name.")
+    excluded = [str(oxide) for oxide in entry.get("excluded_oxides", []) or []]
+    unknown = sorted(set(excluded) - set(OXIDE_ORDER))
+    if unknown:
+        raise ValueError(f"excluded_oxides of {project}: unknown oxide(s) {', '.join(unknown)}")
+    if excluded:
+        removed = {oxide: float(composition.get(oxide, 0.0) or 0.0) for oxide in excluded}
+        composition = {oxide: value for oxide, value in composition.items() if oxide not in excluded}
     lc = LunarComposition(
         project=project,
         description=entry.get("description", project),
@@ -695,6 +703,12 @@ def model_from_config_entry(
     source_transformation = entry.get("source_transformation")
     if source_transformation is not None:
         object.__setattr__(lc, "_source_transformation", source_transformation)
+    if excluded:
+        object.__setattr__(lc, "_excluded_oxides", {
+            "oxides": excluded,
+            "removed_raw_wt_percent": removed,
+            "method": "removed from the raw composition before normalization; the other oxides are renormalized to 100 wt%",
+        })
     return lc
 
 

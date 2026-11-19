@@ -49,7 +49,7 @@ def get_database_components(database_name: str) -> tuple[tuple[str, str], ...]:
             ("Cr2O3", "Cr2O3"),
         )
 
-    elif database_name == "hp633":
+    elif database_name in ("hp633", "hp636"):
         # Match the component names declared by hp633ver.dat
         # Includes all common rock-forming oxides
         # Does not include P2O5 (not declared by hp633ver.dat)

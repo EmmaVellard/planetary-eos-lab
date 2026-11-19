@@ -74,6 +74,18 @@ DATABASES = {
             "P2O5 remains source-only unless a custom P-bearing database is supplied"
         ),
     ),
+    "hp636": ThermodynamicDatabase(
+        name="hp636",
+        database_file="hp636ver.dat",
+        solution_model_file="solution_model.dat",
+        excluded_phases=("q", "crst", "trd"),
+        solution_models=("O(HP)", "Opx(HP)", "Cpx(HP)", "Gt(HP)", "Sp(HP)", "Pl(I1,HP)", "Ilm(WPH)"),
+        pt_range=DEFAULT_PT_RANGE.copy(),
+        description=(
+            "Holland & Powell data set v6.36 - same components and solution models as hp633; "
+            "use it for Ti-bearing compositions (with excluded_oxides for a Ti-free control)"
+        ),
+    ),
     "dew17_hhph": ThermodynamicDatabase(
         name="dew17_hhph",
         database_file="dew17hp622ver_elements.dat",

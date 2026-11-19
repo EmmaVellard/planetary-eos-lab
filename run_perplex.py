@@ -23,6 +23,7 @@ DEFAULT_BUILD_TEMPLATES = {
     "stx21": DEFAULT_BUILD_TEMPLATE,
     "stx24": BASE_DIR / "build_inputs" / "lunar_stx24_template.build.in",
     "hp633": BASE_DIR / "build_inputs" / "lunar_hp633_template.build.in",
+    "hp636": BASE_DIR / "build_inputs" / "lunar_hp636_template.build.in",
     "dew17_hhph": BASE_DIR / "build_inputs" / "icy_dew17_hhph_template.build.in",
     "hpha02_hydrous": BASE_DIR / "build_inputs" / "icy_hpha02_hydrous_simple_template.build.in",
     "dew13_hydrous": BASE_DIR / "build_inputs" / "icy_dew13_hydrous_template.build.in",
@@ -113,6 +114,7 @@ HP633_WERAMI_INPUT_SEQUENCE = (
 DEFAULT_WERAMI_INPUT_SEQUENCES = {
     "stx21": DEFAULT_WERAMI_INPUT_SEQUENCE,
     "hp633": HP633_WERAMI_INPUT_SEQUENCE,
+    "hp636": HP633_WERAMI_INPUT_SEQUENCE,
     "dew17_hhph": HP633_WERAMI_INPUT_SEQUENCE,
     "hpha02_hydrous": HP633_WERAMI_INPUT_SEQUENCE,
     "dew13_hydrous": HP633_WERAMI_INPUT_SEQUENCE,

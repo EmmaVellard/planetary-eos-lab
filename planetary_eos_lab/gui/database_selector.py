@@ -19,6 +19,7 @@ DEFAULT_BUILD_TEMPLATES = {
     "stx21": "build_inputs/lunar_stx21_template.build.in",
     "stx24": "build_inputs/lunar_stx24_template.build.in",
     "hp633": "build_inputs/lunar_hp633_template.build.in",
+    "hp636": "build_inputs/lunar_hp636_template.build.in",
     "dew17_hhph": "build_inputs/icy_dew17_hhph_template.build.in",
     "hpha02_hydrous": "build_inputs/icy_hpha02_hydrous_simple_template.build.in",
     "dew13_hydrous": "build_inputs/icy_dew13_hydrous_template.build.in",
