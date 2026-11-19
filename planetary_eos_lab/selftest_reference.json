@@ -1,0 +1,53 @@
+{
+  "_purpose": "Reference values for planetary-eos-selftest; regenerate with --write-reference, never edit by hand.",
+  "perplex_version": "7.2.5",
+  "database": "stx21",
+  "composition_id": "moon_near_maria_surface_proxy",
+  "perplex_options": {
+    "sample_on_grid": true,
+    "x_nodes": [
+      15,
+      15
+    ],
+    "y_nodes": [
+      15,
+      15
+    ],
+    "grid_levels": [
+      1,
+      1
+    ]
+  },
+  "generated": "2026-11-19",
+  "tolerance_rel": 0.01,
+  "units": {
+    "p_bar": "bar",
+    "t_k": "K",
+    "rho_kgm3": "kg/m3",
+    "vp_kms": "km/s",
+    "vs_kms": "km/s"
+  },
+  "nodes": [
+    {
+      "p_bar": 1000.0,
+      "t_k": 800.0,
+      "rho_kgm3": 3127.52,
+      "vp_kms": 6.97956,
+      "vs_kms": 3.85952
+    },
+    {
+      "p_bar": 25500.0,
+      "t_k": 1500.0,
+      "rho_kgm3": 3582.72,
+      "vp_kms": 8.14429,
+      "vs_kms": 4.53057
+    },
+    {
+      "p_bar": 50000.0,
+      "t_k": 2200.0,
+      "rho_kgm3": 3567.6,
+      "vp_kms": 8.016,
+      "vs_kms": 4.34922
+    }
+  ]
+}
