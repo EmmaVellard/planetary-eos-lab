@@ -45,6 +45,18 @@ DATABASES = {
         pt_range=DEFAULT_PT_RANGE.copy(),
         description="Stixrude & Lithgow-Bertelloni 2021 - default for silicate mantles",
     ),
+    "stx24": ThermodynamicDatabase(
+        name="stx24",
+        database_file="stx24ver.dat",
+        solution_model_file="stx24_solution_model.dat",
+        excluded_phases=(),
+        solution_models=DEFAULT_SOLUTION_MODELS,
+        pt_range={"pressure_bar": {"min": 1000.0, "max": 50000.0}, "temperature_k": {"min": 300.0, "max": 2200.0}},
+        description=(
+            "Stixrude & Lithgow-Bertelloni 2024 - adds Cr2O3 and explicit redox (FeO is passed as Fe + O); "
+            "extends to 300 K"
+        ),
+    ),
     "hp633": ThermodynamicDatabase(
         name="hp633",
         database_file="hp633ver.dat",

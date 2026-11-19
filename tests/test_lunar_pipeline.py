@@ -2017,3 +2017,48 @@ def test_two_warren_models_share_same_paper_but_have_different_study_roles() -> 
     assert len(warren_entries) == 2
     roles = sorted(e["study_role"] for e in warren_entries)
     assert roles == ["primary_reference", "within_framework_sensitivity"]
+
+
+def test_render_stx24_build_input_splits_feo_into_fe_and_o(tmp_path: Path) -> None:
+    """Ti-free Warren (2005) Preferred through the default stx24 template gives the
+    bulk line recorded for moon_w05_preferred_stx24_unified in August 2026
+    (lunar-bsm-interior-models compositions/bsm/war05_preferred/perplex_input.txt)."""
+    composition_file = tmp_path / "composition.json"
+    composition_file.write_text(
+        json.dumps(
+            {
+                "composition_normalized": {
+                    "SiO2": 47.285113,
+                    "Al2O3": 3.907033,
+                    "Cr2O3": 0.0,
+                    "FeO": 9.336806,
+                    "MgO": 36.375476,
+                    "CaO": 3.095572,
+                    "Na2O": 0.0,
+                }
+            }
+        )
+        + "\n"
+    )
+    model = run_perplex.ModelConfig(
+        project=PROJECT,
+        composition_file=composition_file,
+        build_input_file=run_perplex.default_build_template_for_database("stx24"),
+        output_dir=tmp_path / "output",
+        work_dir=tmp_path / "work",
+        database="stx24",
+    )
+
+    rendered = run_perplex.render_build_input(tmp_path / "fake_perplex", model)
+
+    assert "stx24ver.dat" in rendered and "stx24_solution_model.dat" in rendered
+    assert "0.00000000 36.37547600 3.90703300 47.28511300 3.09557200 7.25749810 2.07930790 0.00000000" in rendered
+    assert run_perplex.active_component_oxides("stx24") == {"Na2O", "MgO", "Al2O3", "SiO2", "CaO", "FeO", "Cr2O3"}
+    perplex_dir = tmp_path / "perplex"
+    (perplex_dir / "datafiles").mkdir(parents=True)
+    (perplex_dir / "datafiles" / "stx24ver.dat").write_text(
+        "begin_components\nNa2O 61.979\nMgO 40.304\nAl2O3 101.961\nSiO2 60.084\nCaO 56.077\n"
+        "Fe 55.842\nO 15.999\nCr2O3 151.990\nend_components\n"
+    )
+    feo = {row["oxide"]: row for row in run_perplex.default_component_status(perplex_dir, "stx24")}["FeO"]
+    assert feo["component"] == "Fe + O" and feo["declared_in_database"] and feo["passed_by_build"]

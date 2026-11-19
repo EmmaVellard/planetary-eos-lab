@@ -32,6 +32,20 @@ def get_database_components(database_name: str) -> tuple[tuple[str, str], ...]:
             ("FeO", "FEO"),
         )
 
+    elif database_name == "stx24":
+        # stx24ver.dat declares Fe and O instead of FeO: FeO is split into both
+        # (run_perplex.FEO_SPLIT_FRACTIONS), all iron ferrous, Fe:O = 1:1 in moles.
+        return (
+            ("Na2O", "Na2O"),
+            ("MgO", "MgO"),
+            ("Al2O3", "Al2O3"),
+            ("SiO2", "SiO2"),
+            ("CaO", "CaO"),
+            ("FeO", "Fe"),
+            ("FeO", "O"),
+            ("Cr2O3", "Cr2O3"),
+        )
+
     elif database_name == "hp633":
         # Match the component names declared by hp633ver.dat
         # Includes all common rock-forming oxides

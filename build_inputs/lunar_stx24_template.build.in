@@ -1,0 +1,36 @@
+${PROJECT}
+${PERPLEX_DIR}/datafiles/stx24ver.dat
+
+n
+
+n
+n
+Na2O
+MgO
+Al2O3
+SiO2
+CaO
+Fe
+O
+Cr2O3
+
+n
+1
+1000 50000
+300 2200
+y
+${PERPLEX_BULK_VALUES}
+n
+n
+y
+${PERPLEX_DIR}/datafiles/stx24_solution_model.dat
+O
+Opx
+Cpx
+Gt
+Sp
+Pl
+C2/c
+NaAl
+
+${BUILD_TITLE}

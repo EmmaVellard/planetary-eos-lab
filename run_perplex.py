@@ -21,6 +21,7 @@ DEFAULT_DATABASE = "stx21"
 DEFAULT_BUILD_TEMPLATE = BASE_DIR / "build_inputs" / "lunar_stx21_template.build.in"
 DEFAULT_BUILD_TEMPLATES = {
     "stx21": DEFAULT_BUILD_TEMPLATE,
+    "stx24": BASE_DIR / "build_inputs" / "lunar_stx24_template.build.in",
     "hp633": BASE_DIR / "build_inputs" / "lunar_hp633_template.build.in",
     "dew17_hhph": BASE_DIR / "build_inputs" / "icy_dew17_hhph_template.build.in",
     "hpha02_hydrous": BASE_DIR / "build_inputs" / "icy_hpha02_hydrous_simple_template.build.in",
@@ -160,6 +161,9 @@ OXIDE_COMPONENT_NAMES = {
     "P2O5": "P2O5",
 }
 OMITTED_OXIDE_THRESHOLD = 1.0e-12
+# Mass fractions of FeO passed as Fe and O, from the molar weights declared in stx24ver.dat
+# (Fe 55.842, O 15.999): iron taken as ferrous, Fe:O = 1:1 in moles.
+FEO_SPLIT_FRACTIONS = {"Fe": 55.842 / (55.842 + 15.999), "O": 15.999 / (55.842 + 15.999)}
 DEFAULT_BUILD_DATABASE_FILE = "stx21ver.dat"
 DEFAULT_BUILD_SOLUTION_MODEL_FILE = "stx21_solution_model.dat"
 DEFAULT_BUILD_PT_RANGE = {
@@ -627,6 +631,8 @@ def composition_bulk_values(
         if value is None:
             missing.append(source_name)
             continue
+        if source_name == "FeO" and component in FEO_SPLIT_FRACTIONS:
+            value *= FEO_SPLIT_FRACTIONS[component]
         values.append(f"{value:.8f}")
     if missing:
         noun = "component(s)" if is_component_composition_data(data) else "oxide(s)"
@@ -759,18 +765,26 @@ def default_component_status(
         component.upper()
         for component in read_perplex_database_components(database_path(perplex_dir, database))
     }
-    active_components = {component.upper() for _, component in active_components_for_database(database)}
-    return [
-        {
-            "oxide": oxide,
-            "component": component,
-            "declared_in_database": component.upper() in declared_components,
-            "declared_in_default_database": component.upper() in declared_components,
-            "passed_by_build": component.upper() in active_components,
-            "passed_by_default_build": component.upper() in active_components,
-        }
-        for oxide, component in OXIDE_COMPONENT_NAMES.items()
-    ]
+    active = active_components_for_database(database)
+    active_components = {component.upper() for _, component in active}
+    split = {oxide: [c for o, c in active if o == oxide] for oxide, _ in active}
+    rows = []
+    for oxide, component in OXIDE_COMPONENT_NAMES.items():
+        # One oxide may feed several components (stx24: FeO -> Fe + O).
+        names = split[oxide] if len(split.get(oxide, [])) > 1 else [component]
+        declared = all(name.upper() in declared_components for name in names)
+        passed = all(name.upper() in active_components for name in names)
+        rows.append(
+            {
+                "oxide": oxide,
+                "component": " + ".join(names),
+                "declared_in_database": declared,
+                "declared_in_default_database": declared,
+                "passed_by_build": passed,
+                "passed_by_default_build": passed,
+            }
+        )
+    return rows
 
 
 def extract_pt_range_from_template(template_path: Path) -> tuple[tuple[float, float], tuple[float, float]] | None:
