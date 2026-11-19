@@ -66,6 +66,69 @@ def replace_model_entry(config: dict[str, Any], project: str, replacement: dict[
     return updated
 
 
+LUNAR_BSM_CATALOGUE_PATH = REPO_ROOT / "configs" / "lunar_bsm_models.json"
+OXIDE_COMPOSITION_KEYS = ("oxides_wt_percent", "raw_wt_percent", "composition_raw")
+
+
+def add_missing_model_entries(config: dict[str, Any], entries: list[dict[str, Any]]) -> tuple[dict[str, Any], list[str]]:
+    """Append the entries whose project is not in the config yet; existing ones are left untouched."""
+    updated = deepcopy(config)
+    models = updated.setdefault("models", [])
+    if not isinstance(models, list):
+        raise ValueError("Config field 'models' must be a list.")
+    existing = {model.get("project") for model in models if isinstance(model, dict)}
+    added = []
+    for entry in entries:
+        if entry.get("project") and entry["project"] not in existing:
+            models.append(deepcopy(entry))
+            existing.add(entry["project"])
+            added.append(entry["project"])
+    return updated, added
+
+
+def derived_mantle_entry(
+    source: dict[str, Any],
+    project: str,
+    crust_oxides_wt_percent: dict[str, float],
+    crust_mass_fraction: float,
+    crust_source: str,
+) -> dict[str, Any]:
+    """A new model entry: the source composition with a mantle_extraction block (see make_compositions).
+
+    When the source records its published composition (source_transformation, as in the
+    lunar BSM catalogue), the extraction starts from that full composition and the oxides
+    the catalogue dropped are dropped again afterwards, so the mass balance is not done on
+    a truncated basis.
+    """
+    transformation = source.get("source_transformation") or {}
+    bulk = transformation.get("source_oxides_wt_percent") or next(
+        (source[key] for key in OXIDE_COMPOSITION_KEYS if isinstance(source.get(key), dict)), None
+    )
+    excluded = list(dict.fromkeys([*transformation.get("excluded_oxides", []), *source.get("excluded_oxides", [])]))
+    if bulk is None:
+        raise ValueError(f"{source.get('project', 'source model')} has no oxide composition to extract a mantle from.")
+    entry = {key: deepcopy(value) for key, value in source.items() if key not in OXIDE_COMPOSITION_KEYS}
+    entry.update({
+        "project": project,
+        "description": f"Mantle of {source.get('project', 'the source composition')} after extracting a crust "
+                       f"({crust_source}, f = {crust_mass_fraction:g})",
+        "oxides_wt_percent": deepcopy(bulk),
+        "mantle_extraction": {
+            "crust_oxides_wt_percent": {k: float(v) for k, v in crust_oxides_wt_percent.items() if float(v)},
+            "crust_mass_fraction": float(crust_mass_fraction),
+            "crust_source": crust_source,
+        },
+        "planetprofile_filename": f"{project}_PerpleX.tab",
+    })
+    if excluded:
+        entry["excluded_oxides"] = excluded
+    entry.pop("source_transformation", None)
+    entry["derived_from"] = source.get("project", "")
+    for key in ("composition_file", "output_dir", "work_dir"):
+        entry.pop(key, None)
+    return entry
+
+
 def delete_model_entry(config: dict[str, Any], project: str) -> dict[str, Any]:
     return delete_model_entries(config, [project])
 

@@ -21,10 +21,14 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+import make_compositions
 import plot_comparisons
 import run_perplex
 from planetary_eos_lab.core.config import DATABASES
 from planetary_eos_lab.core.config_io import (
+    LUNAR_BSM_CATALOGUE_PATH,
+    add_missing_model_entries,
+    derived_mantle_entry,
     DEFAULT_CONFIG_PATH,
     EXAMPLE_CONFIG_PATH,
     copy_example_config,
@@ -2049,6 +2053,81 @@ def editable_model_form(config_path: Path, config: dict[str, Any], model: dict[s
         write_config(config_path, updated_config)
 
 
+# Taylor (1999), "The Moon", Encyclopedia of the Solar System, Table III, Highlands (Cr, Mn converted from ppm).
+DEFAULT_CRUST_OXIDES = {
+    "SiO2": 45.0, "TiO2": 0.56, "Al2O3": 24.6, "FeO": 6.6, "MgO": 6.8, "CaO": 15.8,
+    "Na2O": 0.45, "K2O": 0.03, "Cr2O3": 0.1169, "MnO": 0.0736,
+}
+DEFAULT_CRUST_SOURCE = "Taylor (1999), The Moon, Encyclopedia of the Solar System, Table III, Highlands"
+
+
+def show_bsm_catalogue_panel(config_path: Path, config: dict[str, Any]) -> None:
+    st.caption(
+        "Add the published lunar bulk silicate Moon compositions (Hauri et al. 2015, Warren 2005 Preferred "
+        "and Alt. 5) from `configs/lunar_bsm_models.json`. Models already in your config are not changed."
+    )
+    if st.button("Add the published lunar BSMs"):
+        entries = json.loads(LUNAR_BSM_CATALOGUE_PATH.read_text(encoding="utf-8"))["models"]
+        updated, added = add_missing_model_entries(config, entries)
+        if added:
+            write_config(config_path, updated)
+            st.success("Added: " + ", ".join(added))
+        else:
+            st.info("All published BSMs are already in your config.")
+
+
+def show_mantle_extraction_builder(config_path: Path, config: dict[str, Any], models: list[dict[str, Any]]) -> None:
+    st.caption(
+        "Mantle left after extracting a crust from a saved composition: "
+        "X_mantle = (X_bulk − f·X_crust) / (1 − f), both normalized to 100 wt%. "
+        "f is the crust mass over the silicate mass. Do the extraction on the full composition; "
+        "drop oxides (e.g. TiO2) afterwards with `excluded_oxides`."
+    )
+    oxide_models = [m for m in models if any(isinstance(m.get(k), dict) for k in ("oxides_wt_percent", "raw_wt_percent", "composition_raw"))]
+    if not oxide_models:
+        st.info("No saved oxide composition to start from. Add the published lunar BSMs from the Catalog page first.")
+        return
+    source_project = st.selectbox(
+        "Bulk composition", options=[str(m.get("project", "")) for m in oxide_models], key="mantle_source"
+    )
+    source = next(m for m in oxide_models if m.get("project") == source_project)
+    project = st.text_input("New project name", value=f"{source_project}_mantle", key=f"mantle_project_{source_project}")
+    fraction = st.number_input(
+        "Crust mass fraction f", min_value=0.0, max_value=0.99, value=0.05, step=0.001, format="%.5f", key="mantle_f"
+    )
+    crust_source = st.text_input("Crust composition source", value=DEFAULT_CRUST_SOURCE, key="mantle_crust_source")
+    st.markdown("**Crust composition, wt%** (defaults: Taylor 1999 Highlands; edit as needed)")
+    crust_cols = st.columns(4)
+    crust = {
+        oxide: crust_cols[index % 4].number_input(
+            oxide, min_value=0.0, value=float(DEFAULT_CRUST_OXIDES.get(oxide, 0.0)), step=0.01, format="%.4f",
+            key=f"mantle_crust_{oxide}",
+        )
+        for index, oxide in enumerate(OXIDE_ORDER)
+    }
+    try:
+        entry = derived_mantle_entry(source, project.strip(), crust, fraction, crust_source.strip())
+        bulk = entry["oxides_wt_percent"]
+        mantle = make_compositions.residual_mantle_composition(bulk, entry["mantle_extraction"]["crust_oxides_wt_percent"], fraction)
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+    total = sum(float(v or 0.0) for v in bulk.values()) or 1.0
+    st.dataframe(
+        [
+            {"oxide": oxide, "bulk wt% (normalized)": 100.0 * float(bulk.get(oxide, 0.0) or 0.0) / total,
+             "crust wt%": crust.get(oxide, 0.0), "mantle wt%": mantle.get(oxide, 0.0)}
+            for oxide in OXIDE_ORDER if bulk.get(oxide) or crust.get(oxide)
+        ],
+        hide_index=True,
+    )
+    existing = {str(m.get("project", "")) for m in models}
+    if st.button("Save derived mantle to config", type="primary", disabled=not project.strip() or project.strip() in existing):
+        write_config(config_path, replace_model_entry(config, project.strip(), entry))
+    if project.strip() in existing:
+        st.caption(f"`{project.strip()}` already exists: choose another name.")
+
+
 def composition_workspace(config_path: Path, config: dict[str, Any], models: list[dict[str, Any]]) -> dict[str, Any]:
     database = get_current_database(config)
     st.subheader("Build Composition")
@@ -2064,9 +2143,17 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
     with action_col:
         builder_action = st.radio(
             "Builder action",
-            options=["Create a new composition", "Copy a saved composition", "Edit a saved composition"],
+            options=[
+                "Create a new composition",
+                "Copy a saved composition",
+                "Edit a saved composition",
+                "Derive a mantle by crust extraction",
+            ],
             horizontal=True,
         )
+    if builder_action == "Derive a mantle by crust extraction":
+        show_mantle_extraction_builder(config_path, config, models)
+        return {}
     existing_projects = {str(model.get("project", "")) for model in models if model.get("project")}
     creating_new = builder_action == "Create a new composition"
     copying_existing = builder_action == "Copy a saved composition"
@@ -2410,6 +2497,8 @@ def show_composition_page(
         )
 
         st.markdown("**Catalog actions**")
+        with st.expander("Published lunar BSM compositions", expanded=not models):
+            show_bsm_catalogue_panel(config_path, config)
         action_col1, action_col2 = st.columns([1, 1])
         with action_col1:
             with st.expander("Import or export compositions", expanded=True):
