@@ -36,6 +36,147 @@ MODEL_STATUS = (
     "surface terrane proxies for pipeline testing, not final lunar mantle models."
 )
 
+# Status line and notes used for BSM compositions with model_scope
+# 'bulk_silicate_body'. Distinguishes two sub-classes via the (optional)
+# `composition_class` and `study_role` fields:
+#   - published_bsm_reference   / primary_reference        -> BSM_REFERENCE_STATUS
+#   - published_bsm_alternative / within_framework_sensitivity
+#                                                          -> BSM_ALTERNATIVE_STATUS
+# Both classes share the caveat that a BSM inventory is not automatically a
+# homogeneous present-day mantle.
+BSM_REFERENCE_STATUS = (
+    "BULK SILICATE MOON reference composition: this record is a published "
+    "global lunar silicate inventory after core formation. It is NOT "
+    "automatically equivalent to a homogeneous present-day lunar mantle."
+)
+BSM_ALTERNATIVE_STATUS = (
+    "BULK SILICATE MOON published alternative / within-framework "
+    "sensitivity composition: this record is a published alternative row "
+    "from a BSM reference paper and represents a within-framework "
+    "sensitivity to that paper's preferred model. It is NOT an "
+    "independent literature-level BSM estimate, and it is NOT "
+    "automatically equivalent to a homogeneous present-day lunar mantle."
+)
+# Retained for backward compatibility with any external code that imported
+# BSM_STATUS by name. New code should use BSM_REFERENCE_STATUS or
+# BSM_ALTERNATIVE_STATUS explicitly.
+BSM_STATUS = BSM_REFERENCE_STATUS
+
+# Status line and notes used for models whose model_scope is 'mantle_candidate'
+# (hybrid mixtures, IBC-derived oxide vectors, etc). Kept generic; specific
+# derivations belong in the per-model composition_interpretation.
+MANTLE_CANDIDATE_STATUS = (
+    "MANTLE CANDIDATE composition: this record is a derived or hybridized "
+    "lunar mantle scenario, not a published Bulk Silicate Moon inventory."
+)
+
+# `literature_proxy` flag semantics (module-wide contract):
+#   True  -> the composition (or its numerical values) is derived from published
+#            literature. Says NOTHING about scope: a `literature_proxy=True`
+#            model may be a surface proxy, a BSM, a derived mantle, an IBC, etc.
+#   False -> the composition was constructed ad-hoc (typically a user_defined
+#            composition entered through the GUI or a placeholder).
+# Do not use this flag to distinguish surface-proxy from mantle/BSM scope; use
+# `scientific_status` and `model_scope` for that.
+
+
+def _status_line_for_model(model: LunarComposition) -> str:
+    """Return the top-line scope status string for a lunar composition.
+
+    Resolution order:
+    1. `composition_class` (most specific): distinguishes
+       published_bsm_reference from published_bsm_alternative.
+    2. `scientific_status` / `model_scope` fallback.
+    3. Neutral summary for unrecognised scopes.
+    """
+    composition_class = getattr(model, "composition_class", "") or ""
+    status = getattr(model, "scientific_status", "")
+    scope = getattr(model, "model_scope", "")
+
+    if composition_class == "published_bsm_reference":
+        return BSM_REFERENCE_STATUS
+    if composition_class == "published_bsm_alternative":
+        return BSM_ALTERNATIVE_STATUS
+    if composition_class == "surface_proxy":
+        return MODEL_STATUS
+    if status == "surface_proxy_smoke_test" or scope == "surface_terrane_proxy":
+        return MODEL_STATUS
+    if scope == "bulk_silicate_body":
+        # Backward-compatible fallback for a BSM entry that predates the
+        # composition_class field.
+        return BSM_REFERENCE_STATUS
+    if scope == "mantle_candidate":
+        return MANTLE_CANDIDATE_STATUS
+    return (
+        f"Composition scope: {scope or 'unspecified'}; scientific status: "
+        f"{status or 'unspecified'}. Review the composition_interpretation "
+        "and source_note fields before scientific use."
+    )
+
+
+def _scope_specific_notes(model: LunarComposition) -> list[str]:
+    """Return scope-specific notes appended to the JSON output.
+
+    Preserves the strong surface-proxy warning for actual surface proxies.
+    For BSM models, produces notes that correctly describe the composition
+    as a published global silicate inventory (not a present-day mantle),
+    and distinguishes published_bsm_reference from published_bsm_alternative.
+    """
+    composition_class = getattr(model, "composition_class", "") or ""
+    study_role = getattr(model, "study_role", "") or ""
+    status = getattr(model, "scientific_status", "")
+    scope = getattr(model, "model_scope", "")
+
+    bsm_present_day_caveat = (
+        "Do not silently identify this Bulk Silicate Moon composition with "
+        "a homogeneous present-day mantle: any workflow step that requires "
+        "that identification must state the assumption explicitly."
+    )
+
+    if composition_class == "published_bsm_reference" or (
+        not composition_class and scope == "bulk_silicate_body"
+        and status != "surface_proxy_smoke_test"
+        and getattr(model, "composition_class", "") != "published_bsm_alternative"
+    ):
+        role_note = (
+            f"Study role: {study_role or 'primary_reference'}. This entry "
+            "is a published primary BSM reference."
+        )
+        return [BSM_REFERENCE_STATUS, role_note, bsm_present_day_caveat]
+    if composition_class == "published_bsm_alternative":
+        role_note = (
+            f"Study role: {study_role or 'within_framework_sensitivity'}. "
+            "This entry is a published ALTERNATIVE row from a BSM paper; it "
+            "represents a within-framework sensitivity to that paper's "
+            "preferred model and must NOT be presented as an independent "
+            "literature-level BSM estimate."
+        )
+        return [BSM_ALTERNATIVE_STATUS, role_note, bsm_present_day_caveat]
+    if composition_class == "surface_proxy" or status == "surface_proxy_smoke_test" \
+            or scope == "surface_terrane_proxy":
+        return [
+            MODEL_STATUS,
+            (
+                "These source oxides represent lunar surface/terrane proxies, "
+                "not final lunar mantle compositions."
+            ),
+        ]
+    if scope == "mantle_candidate":
+        return [
+            MANTLE_CANDIDATE_STATUS,
+            (
+                "This composition is a derived or hybridized mantle scenario "
+                "and is excluded from the BSM reference set."
+            ),
+        ]
+    return [
+        (
+            "Composition scope is not one of the recognised lunar categories "
+            "(surface_terrane_proxy, bulk_silicate_body, mantle_candidate). "
+            "Review the composition_interpretation and source_note fields."
+        )
+    ]
+
 PERPLEX_BUILD_COMPONENTS = (
     ("Na2O", "NA2O"),
     ("MgO", "MGO"),
@@ -71,6 +212,27 @@ class LunarComposition:
     )
     literature_proxy: bool = True
     database: str = DEFAULT_DATABASE
+    # Optional machine-readable role fields (introduced with the tracked BSM
+    # catalogue). Defaulting to empty strings preserves backward compatibility
+    # for any caller constructing LunarComposition without these fields.
+    #   composition_class:
+    #     "published_bsm_reference"    -> primary literature BSM (Hauri, Warren
+    #                                     Preferred)
+    #     "published_bsm_alternative"  -> published alternative row from a BSM
+    #                                     paper (Warren Alt Model 5)
+    #     "surface_proxy"              -> a lunar surface terrane average
+    #     "" (default)                 -> unspecified; falls back to
+    #                                     model_scope-based handling
+    #   study_role:
+    #     "primary_reference"          -> primary literature-level BSM in the
+    #                                     reference set
+    #     "within_framework_sensitivity"
+    #                                  -> a within-paper sensitivity variant
+    #                                     (must not be presented as
+    #                                     independent literature uncertainty)
+    #     "" (default)                 -> unspecified
+    composition_class: str = ""
+    study_role: str = ""
 
 
 @dataclass(frozen=True)
@@ -93,6 +255,23 @@ class ComponentComposition:
 
 
 CompositionConfig = LunarComposition | ComponentComposition
+
+
+def _recompute_mg_number(oxides: dict[str, float]) -> float | None:
+    """Recompute Mg# = 100 * Mg / (Mg + Fe) in mol% from the wt% oxides.
+
+    Uses molar masses M(MgO) = 40.30 g/mol and M(FeO) = 71.85 g/mol. Returns
+    None when both FeO and MgO are zero (e.g., non-lunar user compositions).
+    Rounds to 2 decimals.
+    """
+    mgo = float(oxides.get("MgO", 0.0) or 0.0)
+    feo = float(oxides.get("FeO", 0.0) or 0.0)
+    mg_mol = mgo / 40.30
+    fe_mol = feo / 71.85
+    total = mg_mol + fe_mol
+    if total <= 0.0:
+        return None
+    return round(100.0 * mg_mol / total, 2)
 
 
 def ordered_composition(composition: dict[str, float]) -> dict[str, float]:
@@ -209,20 +388,23 @@ def write_composition(
         "composition_raw": raw,
         "composition_normalized": normalized,
         "scientific_status": model.scientific_status,
+        "composition_class": getattr(model, "composition_class", "") or "",
+        "study_role": getattr(model, "study_role", "") or "",
         "model_scope": model.model_scope,
         "planetprofile_readiness": model.planetprofile_readiness,
         "composition_interpretation": model.composition_interpretation,
         "placeholder": False,
         "literature_proxy": model.literature_proxy,
         "source_note": model.source_note,
+        "source_transformation": getattr(model, "_source_transformation", None),
+        "mg_number_recomputed_mol_percent": _recompute_mg_number(normalized),
         "perplex_build": build_metadata,
         "default_perplex_build": build_metadata,
         "omitted_oxides_from_build": omitted_oxides,
         "omitted_oxides_from_default_build": omitted_oxides,
         "notes": [
-            MODEL_STATUS,
+            *_scope_specific_notes(model),
             "Use normalized values in Perple_X BUILD unless you intentionally want unnormalized amounts.",
-            "These source oxides represent lunar surface/terrane proxies, not final lunar mantle compositions.",
             "Fe is represented as FeO for the silicate component.",
             "Do not include native Fe, Ni, or Cu unless metallic phases and their elastic properties are intentionally modeled.",
             "KREEP/Th/U/K radiogenic effects should mostly be represented in PlanetProfile thermal/radiogenic parameters.",
@@ -250,7 +432,7 @@ def write_composition(
     with summary_path.open("w", encoding="utf-8") as handle:
         handle.write(f"{model.project}\n")
         handle.write(f"{model.description}\n")
-        handle.write(f"{MODEL_STATUS}\n\n")
+        handle.write(f"{_status_line_for_model(model)}\n\n")
         handle.write("Normalized oxide composition, wt%:\n")
         for oxide in OXIDE_ORDER:
             handle.write(f"{oxide:8s} {normalized[oxide]:10.5f}\n")
@@ -486,7 +668,7 @@ def model_from_config_entry(
     project = entry.get("project")
     if not project:
         raise ValueError("Each inline composition model must define a project name.")
-    return LunarComposition(
+    lc = LunarComposition(
         project=project,
         description=entry.get("description", project),
         raw_wt_percent=composition,
@@ -503,7 +685,17 @@ def model_from_config_entry(
         ),
         literature_proxy=bool(entry.get("literature_proxy", False)),
         database=resolve_database_name(entry.get("database", default_database)),
+        composition_class=str(entry.get("composition_class", "") or ""),
+        study_role=str(entry.get("study_role", "") or ""),
     )
+    # source_transformation is optional catalogue metadata (structured
+    # provenance record). Attach as an object attribute; write_composition
+    # will emit it verbatim into the generated JSON. Frozen dataclass -->
+    # bypass __setattr__ with object.__setattr__.
+    source_transformation = entry.get("source_transformation")
+    if source_transformation is not None:
+        object.__setattr__(lc, "_source_transformation", source_transformation)
+    return lc
 
 
 def models_from_config(

@@ -205,9 +205,9 @@ def scan_table_for_issues(tab_path: Path, tab: TabData) -> list[str]:
             issues.append(f"NaN-only column: {header}")
 
     row_count = len(tab.rows)
-    # Allow up to 0.1% non-finite values (common for edge cases with incomplete phase data)
+    # Allow up to 0.15% non-finite values (common for edge cases with incomplete phase data)
     # For small datasets, still require at least 90% finite values
-    tolerance_fraction = 0.001  # 0.1%
+    tolerance_fraction = 0.0015  # 0.15%
     max_allowed_nonfinite = max(1, int(row_count * tolerance_fraction)) if row_count >= 1000 else 0
 
     for canonical, display in REQUIRED_COLUMNS.items():

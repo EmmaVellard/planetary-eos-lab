@@ -1443,3 +1443,577 @@ def test_pt_range_extraction_from_template() -> None:
         # stx21 uses 1000-50000 bar, 800-2200 K
         assert 800 <= t_min <= 1000
         assert 2000 <= t_max <= 2500
+
+
+# ----------------------------------------------------------------------
+# Tracked BSM scientific catalogue
+#
+# Source of truth for these tests is configs/lunar_bsm_models.json,
+# which is a tracked, machine-independent catalogue of literature-
+# verified Bulk Silicate Moon reference compositions.
+#
+# Warren (2005) Preferred BSM (core-excluded silicate inventory):
+#   Warren, P. H. (2005). "New" lunar meteorites: Implications for
+#   composition of the global lunar surface, lunar crust, and the bulk
+#   Moon. Meteoritics & Planetary Science 40(3), 477-506.
+#   DOI: 10.1111/j.1945-5100.2005.tb00395.x. Table 6 row "Same,
+#   excluding 1.2 wt% core".
+#
+# Published CFMAS+Ti values (wt%):
+#   SiO2 46.8, TiO2 0.18, Al2O3 3.87, FeO 9.24, MgO 36.0, CaO 3.06.
+# Subset sum 99.15. Renormalization factor 100/99.15 = 1.0085728693898135.
+# ----------------------------------------------------------------------
+
+TRACKED_BSM_CATALOGUE = PIPELINE_DIR / "configs" / "lunar_bsm_models.json"
+
+W05_PREFERRED_BSM_PROJECT = "moon_w05_preferred_bsm"
+H15_PROJECT = "moon_h15_lowFe"
+W05_ALT5_PROJECT = "moon_w05_alt5_feRich"
+W05_ALT5_LEGACY_ID = "moon_w05_moderateFe"
+
+# Warren Table 6 "Same, excluding 1.2 wt% core" published CFMAS+Ti oxides.
+W05_PREFERRED_PUBLISHED_CFMAS_TI = {
+    "SiO2": 46.8,
+    "TiO2": 0.18,
+    "Al2O3": 3.87,
+    "FeO": 9.24,
+    "MgO": 36.0,
+    "CaO": 3.06,
+}
+W05_PREFERRED_PUBLISHED_MINORS_EXCLUDED = {
+    "Cr2O3": 0.44,
+    "MnO": 0.132,
+    "Na2O": 0.051,
+    "K2O": 0.005,
+}
+W05_PREFERRED_CFMAS_TI_SUBSET_SUM = 99.15
+W05_PREFERRED_RENORM_FACTOR = 100.0 / W05_PREFERRED_CFMAS_TI_SUBSET_SUM
+
+
+def _load_tracked_bsm_catalogue() -> list[dict]:
+    """Load the tracked BSM scientific catalogue.
+
+    This function reads only configs/lunar_bsm_models.json, which is a
+    tracked file. A clean clone (without configs/models.json) can run
+    every test that uses this helper.
+    """
+    with TRACKED_BSM_CATALOGUE.open() as handle:
+        return json.load(handle)["models"]
+
+
+def _entry_from_catalogue(project: str) -> dict:
+    for entry in _load_tracked_bsm_catalogue():
+        if entry["project"] == project:
+            return entry
+    raise KeyError(project)
+
+
+def _lunar_composition_from_entry(entry: dict) -> "make_compositions.LunarComposition":
+    return make_compositions.LunarComposition(
+        project=entry["project"],
+        description=entry["description"],
+        raw_wt_percent=entry["oxides_wt_percent"],
+        source_note=entry["source_note"],
+        scientific_status=entry["scientific_status"],
+        model_scope=entry["model_scope"],
+        planetprofile_readiness=entry["planetprofile_readiness"],
+        composition_interpretation=entry["composition_interpretation"],
+        literature_proxy=entry["literature_proxy"],
+        database=entry["database"],
+        composition_class=entry.get("composition_class", ""),
+        study_role=entry.get("study_role", ""),
+    )
+
+
+def test_tracked_bsm_catalogue_contains_expected_entries() -> None:
+    """The tracked BSM scientific catalogue must exist, be readable
+    without configs/models.json, and contain exactly the three audited
+    BSM entries (Hauri 2015 + Warren Preferred + Warren Alt Model 5).
+    moon_t82_highFe must NOT be present in the runnable scientific set."""
+    assert TRACKED_BSM_CATALOGUE.exists(), (
+        "Tracked BSM catalogue must be present as configs/lunar_bsm_models.json"
+    )
+    models = _load_tracked_bsm_catalogue()
+    projects = [m["project"] for m in models]
+    assert projects == [H15_PROJECT, W05_PREFERRED_BSM_PROJECT, W05_ALT5_PROJECT], (
+        f"Unexpected tracked catalogue contents: {projects}"
+    )
+    # All three entries must be BSM.
+    for entry in models:
+        assert entry["scientific_status"] == "literature_based"
+        assert entry["model_scope"] == "bulk_silicate_body"
+    # Uniqueness.
+    assert len(projects) == len(set(projects))
+    # moon_t82_highFe is deliberately excluded.
+    assert "moon_t82_highFe" not in projects
+
+
+def test_moon_w05_preferred_bsm_entry_records_warren_core_excluded_values() -> None:
+    """moon_w05_preferred_bsm in the tracked catalogue stores the
+    CFMAS+Ti-renormalized 2-decimal composition derived from Warren 2005
+    Table 6 'Same, excluding 1.2 wt% core', with the source_note preserving
+    the original published values and the transformation."""
+
+    entry = _entry_from_catalogue(W05_PREFERRED_BSM_PROJECT)
+
+    assert entry["scientific_status"] == "literature_based"
+    assert entry["model_scope"] == "bulk_silicate_body"
+    assert entry["literature_proxy"] is True
+    assert entry["database"] == "hp633"
+    assert entry["planetprofile_readiness"] == "pending_eos_generation_and_validation"
+
+    source_note = entry["source_note"]
+    assert "Warren, P. H. (2005)" in source_note
+    assert "10.1111/j.1945-5100.2005.tb00395.x" in source_note
+    assert "Same, excluding 1.2 wt% core" in source_note
+    # Machine-readable provenance now lives in source_transformation.
+    t = entry["source_transformation"]
+    assert t["publication"].startswith("Warren (2005)")
+    assert t["doi"] == "10.1111/j.1945-5100.2005.tb00395.x"
+    assert t["table"] == "Table 6"
+    assert t["row_label"] == "Same, excluding 1.2 wt% core"
+    assert t["source_oxides_wt_percent"]["SiO2"] == 46.8
+    assert t["source_oxides_wt_percent"]["FeO"] == 9.24
+    assert t["source_oxides_wt_percent"]["MgO"] == 36.0
+    assert t["source_oxides_wt_percent"]["Cr2O3"] == 0.44
+    assert t["published_mg_number_mol_percent"] == 87.4
+    assert t["retained_subset_sum_source"] == 99.15
+    assert abs(t["normalization_factor"] - 100.0 / 99.15) < 1e-8
+
+    interp = entry["composition_interpretation"]
+    assert W05_ALT5_PROJECT in interp
+    assert "same" in interp.lower() and "Warren" in interp
+    assert "NOT be presented as independent" in interp
+
+    oxides = entry["oxides_wt_percent"]
+    published_renormalized_two_dp = {
+        oxide: round(value * W05_PREFERRED_RENORM_FACTOR, 2)
+        for oxide, value in W05_PREFERRED_PUBLISHED_CFMAS_TI.items()
+    }
+    for oxide, expected in published_renormalized_two_dp.items():
+        stored = oxides[oxide]
+        assert stored == expected, (
+            f"{oxide}: stored {stored}, expected {expected} "
+            f"(= published {W05_PREFERRED_PUBLISHED_CFMAS_TI[oxide]} "
+            f"x {W05_PREFERRED_RENORM_FACTOR:.16f} rounded to 2 dp)"
+        )
+
+    for oxide in W05_PREFERRED_PUBLISHED_MINORS_EXCLUDED:
+        assert oxides[oxide] == 0.0
+    for oxide in ("NiO", "H2O", "P2O5"):
+        assert oxides[oxide] == 0.0
+
+    # Warren-Preferred's 2-decimal CFMAS+Ti values happen to sum to exactly
+    # 100.00 (46.8 * 1.008573 rounds to 47.20, and so on such that all
+    # rounding directions balance). This is a stronger property than
+    # required by the schema (see test_stored_oxides_sum_to_100_at_declared_precision
+    # for the general bound).
+    assert sum(oxides.values()) == 100.00
+
+
+def test_moon_w05_preferred_bsm_normalization_reproduces_warren_full_precision() -> None:
+    """Feeding the stored 2-decimal oxide vector into
+    make_compositions.normalize_wt_percent recovers the full-precision
+    CFMAS+Ti values Warren Table 6 * (100/99.15)."""
+
+    entry = _entry_from_catalogue(W05_PREFERRED_BSM_PROJECT)
+    normalized = make_compositions.normalize_wt_percent(entry["oxides_wt_percent"])
+
+    for oxide, published in W05_PREFERRED_PUBLISHED_CFMAS_TI.items():
+        expected_full_precision = published * W05_PREFERRED_RENORM_FACTOR
+        max_rounding_error = 0.5 * 0.01  # half a step at 2 dp
+        assert abs(normalized[oxide] - expected_full_precision) <= max_rounding_error
+
+    for oxide in ("Cr2O3", "MnO", "Na2O", "K2O", "NiO", "H2O", "P2O5"):
+        assert normalized[oxide] == 0.0
+
+    assert math.isclose(sum(normalized.values()), 100.0, rel_tol=0, abs_tol=1e-9)
+
+
+def test_bsm_write_composition_emits_bsm_metadata_not_surface_proxy(tmp_path: Path) -> None:
+    """Running make_compositions.write_composition against each BSM entry
+    in the tracked catalogue produces JSON and summary files that carry
+    BSM classification metadata and do NOT carry the surface-proxy
+    warning strings."""
+
+    for entry in _load_tracked_bsm_catalogue():
+        model = _lunar_composition_from_entry(entry)
+        outdir = tmp_path / entry["project"]
+        outdir.mkdir()
+        make_compositions.write_composition(model, outdir=outdir, database="hp633")
+
+        # JSON classification metadata
+        data = json.loads((outdir / f"{entry['project']}.json").read_text())
+        assert data["scientific_status"] == "literature_based"
+        assert data["model_scope"] == "bulk_silicate_body"
+
+        json_text = (outdir / f"{entry['project']}.json").read_text()
+        summary_text = (outdir / f"{entry['project']}_summary.txt").read_text()
+
+        # BSM outputs MUST NOT contain the surface-proxy warning strings.
+        assert "SURFACE PROXY SMOKE TEST ONLY" not in json_text
+        assert "SURFACE PROXY SMOKE TEST ONLY" not in summary_text
+        assert "surface/terrane proxies" not in json_text
+        assert "surface/terrane proxies" not in summary_text
+
+        # BSM outputs MUST contain a BSM scope statement (either the primary
+        # reference or the published-alternative variant, depending on
+        # composition_class).
+        has_reference_line = "BULK SILICATE MOON reference composition" in json_text
+        has_alternative_line = "BULK SILICATE MOON published alternative" in json_text
+        assert has_reference_line or has_alternative_line, (
+            f"{entry['project']}: neither BSM reference nor BSM alternative line in JSON"
+        )
+        summary_has_bsm_line = (
+            "BULK SILICATE MOON reference composition" in summary_text
+            or "BULK SILICATE MOON published alternative" in summary_text
+        )
+        assert summary_has_bsm_line, (
+            f"{entry['project']}: no BSM status line in summary"
+        )
+        # Contract for BSM notes: the anti-identification statement is present.
+        assert "identify" in json_text.lower() and "present-day mantle" in json_text.lower()
+
+
+def test_surface_proxy_write_composition_retains_surface_proxy_warnings(tmp_path: Path) -> None:
+    """The hardcoded surface-proxy configurations must continue to emit
+    the strong 'SURFACE PROXY SMOKE TEST ONLY' warning and the
+    surface/terrane-proxy note in both the JSON and the summary."""
+
+    for project, model in {
+        m.project: m for m in make_compositions.lunar_models()
+    }.items():
+        outdir = tmp_path / project
+        outdir.mkdir()
+        make_compositions.write_composition(model, outdir=outdir)
+
+        json_text = (outdir / f"{project}.json").read_text()
+        summary_text = (outdir / f"{project}_summary.txt").read_text()
+
+        assert "SURFACE PROXY SMOKE TEST ONLY" in json_text
+        assert "SURFACE PROXY SMOKE TEST ONLY" in summary_text
+        assert "surface/terrane proxies" in json_text
+
+        # And they must NOT carry the BSM statement.
+        assert "BULK SILICATE MOON reference composition" not in json_text
+        assert "BULK SILICATE MOON reference composition" not in summary_text
+
+
+def test_bsm_catalogue_preserves_warren_alt5_values() -> None:
+    """Adding the Warren-Preferred BSM to the catalogue must not disturb
+    the Warren Alt Model 5 within-framework sensitivity endmember."""
+
+    entry = _entry_from_catalogue(W05_ALT5_PROJECT)
+    assert entry["scientific_status"] == "literature_based"
+    assert entry["model_scope"] == "bulk_silicate_body"
+    # Warren Alt Model 5 CFMAS+Ti (verified in the study repo audit).
+    assert entry["oxides_wt_percent"]["FeO"] == 10.53
+    assert entry["oxides_wt_percent"]["MgO"] == 35.8
+    assert entry["oxides_wt_percent"]["SiO2"] == 46.5
+    # Its interpretation must mark it as a within-framework sensitivity.
+    interp = entry["composition_interpretation"]
+    assert "Alternative Model 5" in interp
+    assert "not" in interp.lower() and "independent" in interp.lower()
+
+
+def test_bsm_catalogue_moon_h15_hauri_values() -> None:
+    """The Hauri 2015 BSM entry preserves its CFMAS+Ti composition."""
+    entry = _entry_from_catalogue(H15_PROJECT)
+    assert entry["scientific_status"] == "literature_based"
+    assert entry["model_scope"] == "bulk_silicate_body"
+    assert entry["oxides_wt_percent"]["SiO2"] == 45.43
+    assert entry["oxides_wt_percent"]["FeO"] == 8.13
+    assert entry["oxides_wt_percent"]["MgO"] == 38.16
+    assert "Hauri" in entry["source_note"]
+    assert "10.1016/j.epsl.2014.10.053" in entry["source_note"]
+
+
+def test_tracked_bsm_catalogue_records_composition_class_and_study_role() -> None:
+    """Each tracked BSM entry must carry a composition_class and a
+    study_role that distinguishes primary references from within-framework
+    alternatives."""
+
+    role_map = {
+        H15_PROJECT: ("published_bsm_reference", "primary_reference"),
+        W05_PREFERRED_BSM_PROJECT: ("published_bsm_reference", "primary_reference"),
+        W05_ALT5_PROJECT: ("published_bsm_alternative", "within_framework_sensitivity"),
+    }
+    for project, (expected_class, expected_role) in role_map.items():
+        entry = _entry_from_catalogue(project)
+        assert entry.get("composition_class") == expected_class, (
+            f"{project}: composition_class {entry.get('composition_class')!r}, "
+            f"expected {expected_class!r}"
+        )
+        assert entry.get("study_role") == expected_role, (
+            f"{project}: study_role {entry.get('study_role')!r}, "
+            f"expected {expected_role!r}"
+        )
+
+    # Two primary_reference entries; one within_framework_sensitivity entry.
+    catalogue = _load_tracked_bsm_catalogue()
+    primaries = [m for m in catalogue if m.get("study_role") == "primary_reference"]
+    sensitivities = [m for m in catalogue if m.get("study_role") == "within_framework_sensitivity"]
+    assert len(primaries) == 2
+    assert len(sensitivities) == 1
+
+
+def test_bsm_reference_output_differs_from_bsm_alternative_output(tmp_path: Path) -> None:
+    """Generated status/notes for a published_bsm_reference entry must
+    differ from those of a published_bsm_alternative entry: the alternative
+    must be labelled a within-framework sensitivity and must NOT be
+    described as a primary literature-level BSM reference."""
+
+    # Primary reference: Hauri 2015.
+    primary = _lunar_composition_from_entry(_entry_from_catalogue(H15_PROJECT))
+    primary_out = tmp_path / "primary"
+    primary_out.mkdir()
+    make_compositions.write_composition(primary, outdir=primary_out, database="hp633")
+    primary_json = (primary_out / f"{H15_PROJECT}.json").read_text()
+    primary_summary = (primary_out / f"{H15_PROJECT}_summary.txt").read_text()
+
+    # Alternative: Warren Alt Model 5.
+    alt = _lunar_composition_from_entry(_entry_from_catalogue(W05_ALT5_PROJECT))
+    alt_out = tmp_path / "alt"
+    alt_out.mkdir()
+    make_compositions.write_composition(alt, outdir=alt_out, database="hp633")
+    alt_json = (alt_out / f"{W05_ALT5_PROJECT}.json").read_text()
+    alt_summary = (alt_out / f"{W05_ALT5_PROJECT}_summary.txt").read_text()
+
+    # Primary must carry the BSM_REFERENCE_STATUS.
+    assert "BULK SILICATE MOON reference composition" in primary_json
+    assert "BULK SILICATE MOON reference composition" in primary_summary
+    # Primary must NOT be labelled a within-framework sensitivity.
+    assert "within-framework sensitivity" not in primary_json.lower()
+    assert "must NOT be presented as an independent" not in primary_json
+
+    # Alternative must carry the BSM_ALTERNATIVE_STATUS.
+    assert "BULK SILICATE MOON published alternative" in alt_json
+    assert "BULK SILICATE MOON published alternative" in alt_summary
+    assert "within-framework sensitivity" in alt_json.lower()
+    assert "must NOT be presented as an independent" in alt_json
+    # Alternative must NOT be described as a reference composition first-line.
+    assert "BULK SILICATE MOON reference composition" not in alt_summary.splitlines()[2]
+
+    # Both retain the "not automatically a homogeneous present-day mantle"
+    # caveat.
+    for txt in (primary_json, alt_json):
+        assert "not automatically" in txt
+        assert "homogeneous present-day" in txt or "homogeneous, present-day" in txt
+
+
+def test_literature_proxy_is_documented_and_not_used_as_scope_flag() -> None:
+    """literature_proxy is pure metadata (per audit): it is never
+    interpreted as a surface-proxy scope flag by the pipeline. This test
+    documents that contract by asserting that the pipeline module lists
+    'literature_proxy' in the semantics docstring near the module top."""
+
+    src = (PIPELINE_DIR / "make_compositions.py").read_text()
+    # The semantics docstring must exist and warn against using this flag
+    # as a scope indicator.
+    assert "`literature_proxy` flag semantics" in src
+    assert "Do not use this flag to distinguish surface-proxy" in src
+
+
+# ----------------------------------------------------------------------
+# Structured source_transformation schema + deterministic reproducibility
+# ----------------------------------------------------------------------
+
+_RETAINED_CFMAS_TI = ("SiO2", "TiO2", "Al2O3", "FeO", "MgO", "CaO")
+
+
+def test_every_tracked_bsm_entry_follows_common_schema() -> None:
+    """Every BSM entry in the tracked catalogue must carry the common
+    structured schema (composition_class, study_role, source_transformation
+    block with retained/excluded lists, source_oxides_wt_percent,
+    normalization_factor, retained_subset_sum_source)."""
+    required_top_fields = (
+        "project", "description", "scientific_status", "composition_class",
+        "study_role", "model_scope", "planetprofile_readiness",
+        "composition_interpretation", "literature_proxy", "source_note",
+        "source_transformation", "oxides_wt_percent", "database",
+        "perplex_options",
+    )
+    required_transformation_fields = (
+        "publication", "doi", "table", "row_label",
+        "normalization_basis", "source_precision",
+        "source_oxides_wt_percent", "retained_oxides", "excluded_oxides",
+        "retained_subset_sum_source", "normalization_factor",
+        "implementation_basis", "implementation_precision_decimals",
+        "published_mg_number_mol_percent",
+    )
+    for entry in _load_tracked_bsm_catalogue():
+        for field in required_top_fields:
+            assert field in entry, (
+                f"{entry.get('project')}: missing top-level field {field!r}"
+            )
+        t = entry["source_transformation"]
+        for field in required_transformation_fields:
+            assert field in t, (
+                f"{entry['project']}: missing source_transformation.{field!r}"
+            )
+        # All entries use CFMAS+Ti with the same retained subset.
+        assert tuple(t["retained_oxides"]) == _RETAINED_CFMAS_TI, (
+            f"{entry['project']}: retained_oxides is not CFMAS+Ti"
+        )
+        assert t["implementation_basis"] == "CFMAS+Ti"
+
+
+def test_stored_oxides_reproducible_from_source_transformation() -> None:
+    """The stored oxides_wt_percent must equal
+    round(source_oxides * normalization_factor, implementation_precision_decimals)
+    for each retained oxide, and 0.0 for each other oxide in OXIDE_ORDER.
+    """
+    for entry in _load_tracked_bsm_catalogue():
+        t = entry["source_transformation"]
+        precision = int(t["implementation_precision_decimals"])
+        factor = float(t["normalization_factor"])
+        # Verify factor is the deterministic inverse of the source subset sum.
+        expected_factor = 100.0 / float(t["retained_subset_sum_source"])
+        assert abs(factor - expected_factor) < 1e-8, (
+            f"{entry['project']}: normalization_factor {factor} != 100/subset_sum "
+            f"({expected_factor})"
+        )
+        stored = entry["oxides_wt_percent"]
+        source = t["source_oxides_wt_percent"]
+        for oxide in t["retained_oxides"]:
+            expected = round(source[oxide] * factor, precision)
+            assert stored[oxide] == expected, (
+                f"{entry['project']}: {oxide} stored {stored[oxide]}, "
+                f"expected round({source[oxide]} * {factor}, {precision}) = "
+                f"{expected}"
+            )
+        # Every oxide NOT in retained_oxides must be zero in the stored vector.
+        from make_compositions import OXIDE_ORDER
+        for oxide in OXIDE_ORDER:
+            if oxide in t["retained_oxides"]:
+                continue
+            assert stored.get(oxide, 0.0) == 0.0, (
+                f"{entry['project']}: non-retained oxide {oxide} is not zero "
+                f"in stored vector"
+            )
+
+
+def test_stored_oxides_sum_to_100_within_deterministic_rounding_bound() -> None:
+    """Storing N retained oxides at precision p introduces per-component
+    rounding of at most 0.5 * 10^-p. The worst-case sum error is therefore
+    N * 0.5 * 10^-p. This bound is a mathematical consequence of the
+    documented rounding, not an invented scientific tolerance."""
+    for entry in _load_tracked_bsm_catalogue():
+        t = entry["source_transformation"]
+        p = int(t["implementation_precision_decimals"])
+        n_retained = len(t["retained_oxides"])
+        bound = n_retained * 0.5 * (10 ** -p)  # e.g., 6 * 0.5 * 0.01 = 0.03
+        total = sum(entry["oxides_wt_percent"].values())
+        assert abs(total - 100.0) <= bound, (
+            f"{entry['project']}: stored sum {total} deviates from 100 by more "
+            f"than the deterministic rounding bound {bound} (N={n_retained}, "
+            f"p={p})"
+        )
+        # After the pipeline's own renormalize_wt_percent, the sum must be
+        # exactly 100 at full float precision. Verify this separately.
+        renormalized = make_compositions.normalize_wt_percent(entry["oxides_wt_percent"])
+        assert math.isclose(sum(renormalized.values()), 100.0, rel_tol=0, abs_tol=1e-9), (
+            f"{entry['project']}: pipeline renormalization does not produce sum=100"
+        )
+
+
+def test_source_minor_oxides_are_preserved_in_provenance_even_when_excluded() -> None:
+    """Even though excluded oxides are zeroed in oxides_wt_percent, they must
+    remain visible in source_transformation.source_oxides_wt_percent."""
+    for entry in _load_tracked_bsm_catalogue():
+        t = entry["source_transformation"]
+        for oxide in t["excluded_oxides"]:
+            assert oxide in t["source_oxides_wt_percent"], (
+                f"{entry['project']}: excluded oxide {oxide} missing from "
+                "source_oxides_wt_percent"
+            )
+            assert t["source_oxides_wt_percent"][oxide] > 0.0 \
+                or oxide == "P2O5"  # P2O5 may be trace or zero in Hauri
+        # Retained and excluded must partition the source oxides.
+        source_keys = set(t["source_oxides_wt_percent"].keys())
+        retained = set(t["retained_oxides"])
+        excluded = set(t["excluded_oxides"])
+        assert retained.isdisjoint(excluded)
+        assert source_keys == retained | excluded, (
+            f"{entry['project']}: source_oxides {source_keys} do not equal "
+            f"retained {retained} + excluded {excluded}"
+        )
+
+
+def test_mg_number_recomputed_matches_stored_and_published(tmp_path: Path) -> None:
+    """Recomputed Mg# in the generated JSON must be consistent with the
+    stored FeO/MgO values, and within reasonable proximity to the published
+    Mg# (bounded by rounding of the retained CFMAS+Ti oxides and any
+    Fe2O3/FeO reporting differences in the source)."""
+    for entry in _load_tracked_bsm_catalogue():
+        model = _lunar_composition_from_entry(entry)
+        outdir = tmp_path / entry["project"]
+        outdir.mkdir()
+        make_compositions.write_composition(model, outdir=outdir, database="hp633")
+        data = json.loads((outdir / f"{entry['project']}.json").read_text())
+        recomputed = data["mg_number_recomputed_mol_percent"]
+        # Independently recompute from the stored oxides.
+        stored = data["composition_normalized"]
+        mg_mol = stored["MgO"] / 40.30
+        fe_mol = stored["FeO"] / 71.85
+        expected = round(100.0 * mg_mol / (mg_mol + fe_mol), 2)
+        assert recomputed == expected
+
+        # Compare to published Mg#; allow up to 2 mol% offset, which is
+        # dominated by the FeO 2-decimal rounding at these oxide levels and
+        # by any Fe redox choices in the source publication. This is not an
+        # invented tolerance: 0.01 wt% rounding in a 9-10 wt% FeO shifts
+        # Mg# by ~0.05 mol%; larger allowance covers cases where the source
+        # reports Mg# under a slightly different Fe convention.
+        published = entry["source_transformation"]["published_mg_number_mol_percent"]
+        assert abs(recomputed - float(published)) <= 2.0, (
+            f"{entry['project']}: recomputed Mg# {recomputed} vs published "
+            f"{published}"
+        )
+
+
+def test_all_bsms_use_identical_thermodynamic_settings() -> None:
+    """All three approved BSMs must use the same hp633 solid-only settings
+    so that differences in the resulting EOS tables can be attributed to
+    input composition rather than to different numerical or thermodynamic
+    settings."""
+    databases = set()
+    perplex_options = set()
+    for entry in _load_tracked_bsm_catalogue():
+        databases.add(entry["database"])
+        po = entry["perplex_options"]
+        # Serialize deterministically for set membership.
+        perplex_options.add(json.dumps(po, sort_keys=True))
+    assert databases == {"hp633"}
+    assert len(perplex_options) == 1
+
+
+def test_no_liquid_model_or_disallowed_composition_in_catalogue() -> None:
+    """The catalogue must not silently include a liquid model, a rejected
+    model (moon_t82_highFe), a surface proxy, or any composition outside
+    the approved reference set."""
+    approved = {"moon_h15_lowFe", "moon_w05_preferred_bsm", "moon_w05_alt5_feRich"}
+    for entry in _load_tracked_bsm_catalogue():
+        assert entry["project"] in approved, (
+            f"Unexpected project in catalogue: {entry['project']}"
+        )
+        assert entry["scientific_status"] == "literature_based"
+        assert entry["composition_class"] in (
+            "published_bsm_reference", "published_bsm_alternative"
+        )
+        # No liquid model activated yet.
+        assert "liquid_model" not in entry
+        assert "melt_model" not in entry
+        assert "liquid_solution_models" not in entry
+
+
+def test_two_warren_models_share_same_paper_but_have_different_study_roles() -> None:
+    """Contract: the two Warren entries share the same DOI and must NOT
+    both be labelled `primary_reference`."""
+    warren_entries = [
+        e for e in _load_tracked_bsm_catalogue()
+        if e["source_transformation"]["doi"] == "10.1111/j.1945-5100.2005.tb00395.x"
+    ]
+    assert len(warren_entries) == 2
+    roles = sorted(e["study_role"] for e in warren_entries)
+    assert roles == ["primary_reference", "within_framework_sensitivity"]

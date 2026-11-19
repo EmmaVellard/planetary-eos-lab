@@ -113,6 +113,8 @@ PIPELINE_MODEL_SELECTOR_KEYS = [
     "export_model_projects",
 ]
 RUNNING_COMMAND_JOB_KEY = "streamlit_running_command_job"
+PERSISTENT_JOBS_DIR = REPO_ROOT / ".jobs"
+PERSISTENT_JOBS_FILE = PERSISTENT_JOBS_DIR / "running_jobs.json"
 
 PIPELINE_STEPS = [
     "1. Setup & Select Models",
@@ -1442,8 +1444,10 @@ def start_streamlit_command_job(commands: list[PipelineCommand], *, job_label: s
         return
 
     timestamp = time.strftime("%Y%m%d-%H%M%S")
+    job_id = f"job_{timestamp}"
     log_path = REPO_ROOT / "outputs" / "streamlit_runs" / f"{job_label.lower().replace(' ', '_')}_{timestamp}.log"
     job = {
+        "job_id": job_id,
         "job_label": job_label,
         "commands": commands,
         "index": 0,
@@ -1453,10 +1457,60 @@ def start_streamlit_command_job(commands: list[PipelineCommand], *, job_label: s
         "current_label": "",
         "log_path": str(log_path),
         "process": None,
+        "start_time": timestamp,
     }
     st.session_state[RUNNING_COMMAND_JOB_KEY] = job
+    # Save to persistent storage (without the process object and with serializable commands)
+    serializable_job = {k: v for k, v in job.items() if k not in ("process", "commands")}
+    serializable_job["commands"] = [
+        {"label": cmd.label, "command": list(cmd.command), "cwd": str(cmd.cwd)}
+        for cmd in commands
+    ]
+    serializable_job["total_commands"] = len(commands)
+    add_persistent_job(serializable_job)
     launch_current_streamlit_command()
     st.rerun()
+
+
+def load_persistent_jobs() -> dict[str, dict[str, Any]]:
+    """Load persistent jobs from disk."""
+    if not PERSISTENT_JOBS_FILE.exists():
+        return {}
+    try:
+        return json.loads(PERSISTENT_JOBS_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_persistent_jobs(jobs: dict[str, dict[str, Any]]) -> None:
+    """Save persistent jobs to disk."""
+    PERSISTENT_JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    PERSISTENT_JOBS_FILE.write_text(json.dumps(jobs, indent=2))
+
+
+def add_persistent_job(job: dict[str, Any]) -> None:
+    """Add a job to persistent storage."""
+    jobs = load_persistent_jobs()
+    job_id = str(job.get("job_id", job.get("pid", "unknown")))
+    jobs[job_id] = job
+    save_persistent_jobs(jobs)
+
+
+def remove_persistent_job(job_id: str) -> None:
+    """Remove a job from persistent storage."""
+    jobs = load_persistent_jobs()
+    if job_id in jobs:
+        del jobs[job_id]
+        save_persistent_jobs(jobs)
+
+
+def update_persistent_job_status(job_id: str, status: str, **kwargs: Any) -> None:
+    """Update a job's status in persistent storage."""
+    jobs = load_persistent_jobs()
+    if job_id in jobs:
+        jobs[job_id]["status"] = status
+        jobs[job_id].update(kwargs)
+        save_persistent_jobs(jobs)
 
 
 def poll_streamlit_command_job() -> dict[str, Any] | None:
@@ -1478,6 +1532,8 @@ def poll_streamlit_command_job() -> dict[str, Any] | None:
     log_path = Path(str(job["log_path"]))
     append_command_log(log_path, f"\nCommand exited with return code {returncode}.\n")
     job["process"] = None
+    job_id = str(job.get("job_id", "unknown"))
+
     if returncode == 0:
         job["completed"] = int(job.get("completed", 0)) + 1
         job["index"] = int(job.get("index", 0)) + 1
@@ -1485,12 +1541,15 @@ def poll_streamlit_command_job() -> dict[str, Any] | None:
         if int(job["index"]) >= len(commands):
             job["status"] = "complete"
             job["message"] = f"Finished {job['completed']}/{len(commands)} run(s)."
+            update_persistent_job_status(job_id, "complete", message=job["message"], completed=job["completed"])
         else:
+            update_persistent_job_status(job_id, "running", completed=job["completed"], index=job["index"])
             launch_current_streamlit_command()
         return job
 
     job["status"] = "failed"
     job["message"] = f"Stopped after {job.get('completed', 0)}/{len(job.get('commands', []))} completed run(s)."
+    update_persistent_job_status(job_id, "failed", message=job["message"])
     return job
 
 
@@ -1516,6 +1575,8 @@ def terminate_streamlit_command_job() -> None:
     job["status"] = "killed"
     job["message"] = "Run killed by user."
     job["process"] = None
+    job_id = str(job.get("job_id", "unknown"))
+    update_persistent_job_status(job_id, "killed", message=job["message"])
     append_command_log(Path(str(job["log_path"])), "\nRun killed by user.\n")
 
 
@@ -1649,12 +1710,50 @@ def show_streamlit_command_job() -> None:
         else:
             st.caption("Waiting for command output...")
         if status != "running" and st.button("Clear run status", key="clear_streamlit_command_job"):
+            job_id = str(job.get("job_id", "unknown"))
+            remove_persistent_job(job_id)
             del st.session_state[RUNNING_COMMAND_JOB_KEY]
             st.rerun()
 
     if status == "running":
         time.sleep(1)
         st.rerun()
+
+
+def show_persistent_jobs() -> None:
+    """Show all persistent jobs from disk."""
+    jobs = load_persistent_jobs()
+    if not jobs:
+        return
+
+    st.divider()
+    st.subheader("All Jobs")
+    st.caption("Jobs persist even when the page is closed")
+
+    for job_id, job in sorted(jobs.items(), key=lambda x: x[1].get("start_time", ""), reverse=True):
+        status = str(job.get("status", "unknown"))
+        job_label = str(job.get("job_label", "Job"))
+        start_time = str(job.get("start_time", ""))
+        completed = int(job.get("completed", 0))
+        total = len(job.get("commands", []))
+
+        status_emoji = {"running": "🔄", "complete": "✅", "failed": "❌", "killed": "⏹️"}.get(status, "❓")
+
+        with st.expander(f"{status_emoji} {job_label} - {start_time} ({completed}/{total})"):
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.caption(f"**Status:** {status}")
+                st.caption(f"**Progress:** {completed}/{total} commands")
+                if job.get("message"):
+                    st.caption(f"**Message:** {job['message']}")
+                log_path = Path(str(job.get("log_path", "")))
+                if log_path.exists():
+                    st.caption(f"**Log:** `{log_path}`")
+            with col2:
+                if status in ("complete", "failed", "killed"):
+                    if st.button("Remove", key=f"remove_job_{job_id}", type="secondary"):
+                        remove_persistent_job(job_id)
+                        st.rerun()
 
 
 def run_streamlit_commands(commands: list[PipelineCommand], *, job_label: str = "Pipeline run") -> None:
@@ -2557,6 +2656,7 @@ def main() -> None:
         seed_model_selector_state(selector_key, available_projects)
     with st.sidebar:
         show_sidebar_local_configuration(config_path, config, workspace_mode)
+        show_persistent_jobs()
     if not st.session_state.get("planetprofile_export_dir"):
         st.session_state["planetprofile_export_dir"] = str(DEFAULT_PLANETPROFILE_EXPORT_DIR)
 
