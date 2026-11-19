@@ -17,13 +17,7 @@ The included Moon near-side/far-side models are example smoke tests. They are us
 
 ### Quick Install
 
-**Option 1: From PyPI (when published)**
-```bash
-pip install planetary-eos-lab
-planetary-eos-gui
-```
-
-**Option 2: From source**
+**Option 1: From source**
 ```bash
 git clone https://github.com/EmmaVellard/planetary-eos-lab.git
 cd planetary-eos-lab
@@ -31,7 +25,7 @@ pip install -e .
 planetary-eos-gui
 ```
 
-**Option 3: Development install**
+**Option 2: Development install**
 ```bash
 git clone https://github.com/EmmaVellard/planetary-eos-lab.git
 cd planetary-eos-lab
@@ -110,6 +104,13 @@ Do not edit generated files in `compositions/` or `outputs/` as the source of tr
 - Modeled oxides: Na2O, MgO, Al2O3, SiO2, CaO, FeO
 - Best for: Silicate mantles, standard compositions
 - Database file: `stx21ver.dat`
+
+**stx24** - Stixrude & Lithgow-Bertelloni 2024
+- Modeled oxides: Na2O, MgO, Al2O3, SiO2, CaO, FeO, Cr2O3
+- FeO is passed to BUILD as the components Fe + O (split by their molar weights in `stx24ver.dat`; iron taken as ferrous), so Perple_X computes the Fe2+/Fe3+ partitioning
+- Template range: 0.1-5 GPa, 300-2200 K; no excluded phase
+- Database files: `stx24ver.dat`, `stx24_solution_model.dat`
+- The template was reconstructed in November 2026; tables rebuilt with it differ from the August 2026 lunar tables on about 5 % of the nodes (median relative difference 1e-5)
 
 **hp633** - Holland & Powell 2011 (v6.33)
 - Modeled oxides: Na2O, MgO, Al2O3, SiO2, K2O, CaO, TiO2, FeO

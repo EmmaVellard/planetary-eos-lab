@@ -36,7 +36,9 @@ HANDOFF.md
 MIGRATION_GUIDE.md
 
 # Files
-docs/
+# docs/ holds internal notes; only the user guides are tracked
+docs/*
+!docs/icy_worlds_guide.md
 .jobs/
 fits/
 fits_plots/

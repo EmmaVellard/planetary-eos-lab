@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0] - 2024-07-01
+### Added
+- stx24 database (Stixrude & Lithgow-Bertelloni 2024) with its BUILD template; FeO passed as Fe + O.
+- Tracked BSM catalogue `configs/lunar_bsm_models.json` with `composition_class` and `study_role`.
+- GUI run history kept on disk (`.jobs/`), with status, exit codes and a kill button.
+- `docs/icy_worlds_guide.md` is now tracked (the README linked to it).
+
+### Changed
+- `validate_tab.py` accepts up to 0.15 % non-finite values in large tables (was 0.1 %).
+- Component status shows an oxide split into several components (FeO -> Fe + O).
+
+## [1.0] - 2026-07-01
 
 ### Added
 - Initial public release
