@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from planetary_eos_lab.core.config import DATABASES
+from planetary_eos_lab.core.config import DATABASES, register_custom_databases
 from planetary_eos_lab.core.database_utils import get_database_components, get_source_only_oxides
 
 
@@ -709,6 +709,7 @@ def models_from_config(
             "and set perplex_dir to your local Perple_X install."
         )
     data = json.loads(config_path.read_text(encoding="utf-8"))
+    register_custom_databases(data, config_base_dir(config_path))
     default_database = resolve_database_name(database_override or data.get("database", DEFAULT_DATABASE))
     models: list[CompositionConfig] = []
     for entry in data.get("models", []):
@@ -810,8 +811,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--project", help="Generate only one project from the config.")
     parser.add_argument(
         "--database",
-        choices=sorted(DATABASES),
-        help="Thermodynamic database profile to use instead of the config value.",
+        help="Thermodynamic database to use instead of the config value (built-in or declared in custom_databases).",
     )
     return parser.parse_args(argv)
 

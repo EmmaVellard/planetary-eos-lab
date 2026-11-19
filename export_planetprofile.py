@@ -177,8 +177,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--project", help="Export only one project from the config.")
     parser.add_argument(
         "--database",
-        choices=sorted(run_perplex.DATABASES),
-        help="Thermodynamic database profile to use instead of the config value.",
+        help="Thermodynamic database to use instead of the config value (built-in or declared in custom_databases).",
     )
     parser.add_argument(
         "--perplex-dir",

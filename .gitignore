@@ -39,6 +39,7 @@ MIGRATION_GUIDE.md
 # docs/ holds internal notes; only the user guides are tracked
 docs/*
 !docs/icy_worlds_guide.md
+!docs/adding_a_database.md
 .jobs/
 fits/
 fits_plots/

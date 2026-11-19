@@ -22,6 +22,9 @@ def get_database_components(database_name: str) -> tuple[tuple[str, str], ...]:
     if database_name not in DATABASES:
         raise ValueError(f"Unknown database: {database_name}")
 
+    if DATABASES[database_name].components:
+        return DATABASES[database_name].components
+
     if database_name == "stx21":
         return (
             ("Na2O", "NA2O"),

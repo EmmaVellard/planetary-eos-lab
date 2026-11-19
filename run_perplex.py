@@ -9,7 +9,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from planetary_eos_lab.core.config import DATABASES
+from planetary_eos_lab.core.config import DATABASES, register_custom_databases
 from planetary_eos_lab.core.database_utils import get_database_components, get_source_only_oxides
 from planetprofile_tables import write_planetprofile_native_table
 from validate_tab import column_indices, read_tab, validate_project_output
@@ -255,6 +255,13 @@ def is_component_composition_data(data: dict) -> bool:
     return basis in COMPONENT_COMPOSITION_ALIASES or "component_order" in data
 
 
+def register_config_databases(data: dict, base_dir: Path) -> None:
+    """Register the config's custom databases with their default template and WERAMI sequence."""
+    for db in register_custom_databases(data, base_dir):
+        DEFAULT_BUILD_TEMPLATES[db.name] = Path(db.build_template)
+        DEFAULT_WERAMI_INPUT_SEQUENCES[db.name] = db.werami_input_sequence or DEFAULT_WERAMI_INPUT_SEQUENCE
+
+
 def default_werami_sequence_for_database(database: str) -> tuple[str, ...]:
     return DEFAULT_WERAMI_INPUT_SEQUENCES.get(
         resolve_database_name(database),
@@ -358,6 +365,7 @@ def load_config(
             "and set perplex_dir to your local Perple_X install."
         )
     data = json.loads(config_path.read_text(encoding="utf-8"))
+    register_config_databases(data, base_dir)
     pipeline_database = resolve_database_name(database_override or data.get("database", DEFAULT_DATABASE))
     pipeline_perplex_options = perplex_options_from_config(data.get("perplex_options"))
     configured_build_template = data.get("build_template_file")
@@ -1109,8 +1117,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--project", help="Run only one project from the config.")
     parser.add_argument(
         "--database",
-        choices=sorted(DATABASES),
-        help="Thermodynamic database profile to use instead of the config value.",
+        help="Thermodynamic database to use instead of the config value (built-in or declared in custom_databases).",
     )
     parser.add_argument(
         "--perplex-dir",

@@ -245,12 +245,19 @@ def inject_styles() -> None:
 
 def load_config_or_none(config_path: Path) -> dict[str, Any] | None:
     try:
-        return load_config_json(config_path)
+        config = load_config_json(config_path)
     except FileNotFoundError:
         return None
     except json.JSONDecodeError as exc:
         st.error(f"Config JSON is invalid: {exc}")
         return None
+    try:
+        run_perplex.register_config_databases(config, run_perplex.config_base_dir(config_path))
+    except Exception as exc:  # a bad custom database must not hide the rest of the app
+        st.error(f"custom_databases in {config_path.name}: {exc}")
+    for name, template in run_perplex.DEFAULT_BUILD_TEMPLATES.items():
+        DEFAULT_BUILD_TEMPLATES.setdefault(name, normalize_build_template_path(template))
+    return config
 
 
 def write_config(config_path: Path, config: dict[str, Any]) -> None:
