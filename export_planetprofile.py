@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 import shutil
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +14,7 @@ import run_perplex
 
 
 DEFAULT_EXPORT_DIR = run_perplex.BASE_DIR / "outputs" / "planetprofile_export"
+PERPLEX_VERSION_PATTERN = re.compile(r"Perple_X (?:release|version) ([0-9][0-9A-Za-z.\-]*[0-9A-Za-z])")
 
 
 class ExportError(RuntimeError):
@@ -94,17 +98,57 @@ def omitted_oxide_manifest_records(model: run_perplex.ModelConfig, composition: 
         return []
 
 
+def sha256_file(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def portable_path(path: Path | str, root: Path, prefix: str = "") -> str:
+    """Path relative to root (optionally prefixed), else the bare file name: the manifest is meant to be shared."""
+    path = Path(path)
+    try:
+        relative = path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return path.name
+    return f"{prefix}/{relative}" if prefix else relative
+
+
+def perplex_version(model: run_perplex.ModelConfig) -> str | None:
+    log_path = model.output_dir / "build.log"
+    if not log_path.is_file():
+        return None
+    match = PERPLEX_VERSION_PATTERN.search(log_path.read_text(encoding="utf-8", errors="ignore"))
+    return match.group(1) if match else None
+
+
+def eos_lab_git_provenance(repo_dir: Path = run_perplex.BASE_DIR) -> dict:
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=repo_dir, capture_output=True, text=True, check=True, timeout=30
+        ).stdout.strip()
+
+    try:
+        commit = git("rev-parse", "HEAD")
+        # Tracked files only: untracked outputs or editor files should not flag the code as modified.
+        dirty = bool(git("status", "--porcelain", "--untracked-files=no"))
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"git_commit": None, "git_dirty": None, "git_unavailable_reason": f"{type(exc).__name__}: {exc}"}
+    return {"git_commit": commit, "git_dirty": dirty, "git_unavailable_reason": None}
+
+
 def table_manifest_record(table: ExportedTable, config: run_perplex.PipelineConfig) -> dict:
     model = table.model
     composition = read_composition_metadata(model)
     build_provenance = run_perplex.build_template_provenance(config.perplex_dir, model)
+    perplex_name = config.perplex_dir.name
     return {
         "project": table.project,
         "exported_filename": table.destination.name,
         "filename_for_planetprofile": table.destination.name,
-        "source_native_table": str(table.source),
-        "export_destination": str(table.destination),
-        "composition_file": str(model.composition_file),
+        "exported_table_sha256": sha256_file(table.destination),
+        "source_native_table": portable_path(table.source, run_perplex.BASE_DIR),
+        "composition_file": portable_path(model.composition_file, run_perplex.BASE_DIR),
         "planetprofile_first_axis": model.planetprofile_first_axis,
         "scientific_status": metadata_value(
             model,
@@ -129,10 +173,15 @@ def table_manifest_record(table: ExportedTable, config: run_perplex.PipelineConf
         "database_name": model.database,
         "active_perplex_components": run_perplex.active_component_records(model.database),
         "omitted_oxides": omitted_oxide_manifest_records(model, composition),
-        "build_template_used": str(model.build_input_file),
-        "perplex_dir": str(config.perplex_dir),
-        "database_file": build_provenance["database_file"],
-        "solution_model_file": build_provenance["solution_model_file"],
+        "build_template_used": portable_path(model.build_input_file, run_perplex.BASE_DIR),
+        # BUILD reads the template rendered on stdin (no build.in is written); the rendered text is in build.log.
+        "build_template_sha256": sha256_file(model.build_input_file),
+        "perplex_dir": perplex_name,
+        "perplex_version": perplex_version(model),
+        "database_file": portable_path(build_provenance["database_file"], config.perplex_dir, perplex_name),
+        "solution_model_file": portable_path(
+            build_provenance["solution_model_file"], config.perplex_dir, perplex_name
+        ),
         "p_t_range": build_provenance["p_t_range"],
         "excluded_phases": build_provenance["excluded_phases"],
         "solution_models": build_provenance["solution_models"],
@@ -151,8 +200,9 @@ def write_manifest(
     config: run_perplex.PipelineConfig,
 ) -> Path:
     manifest = {
-        "schema_version": 2,
+        "schema_version": 3,
         "description": "PlanetProfile-format Perple_X EOS tables exported by Planetary EOS Lab.",
+        "eos_lab": eos_lab_git_provenance(),
         "export_warning": (
             "Export success means the files are mechanically available to PlanetProfile. "
             "Export success does not imply scientific readiness: the compositions, "

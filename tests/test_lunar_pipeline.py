@@ -1045,7 +1045,7 @@ def test_export_planetprofile_copies_native_tables_with_manifest(tmp_path: Path)
     assert exported.read_text().startswith("|6.6.6\n")
     assert manifest.exists()
     manifest_data = json.loads(manifest.read_text())
-    assert manifest_data["schema_version"] == 2
+    assert manifest_data["schema_version"] == 3
     assert "does not imply scientific readiness" in manifest_data["export_warning"]
     table = manifest_data["tables"][0]
     assert table["exported_filename"] == "Custom_PlanetProfile_EOS.tab"
