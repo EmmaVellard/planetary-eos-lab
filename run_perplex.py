@@ -6,7 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from planetary_eos_lab.core.config import DATABASES, register_custom_databases
@@ -219,6 +219,12 @@ class ModelConfig:
     composition_interpretation: str | None = None
     werami_input_sequence: tuple[str, ...] = DEFAULT_WERAMI_INPUT_SEQUENCE
     perplex_options: PerplexOptions = DEFAULT_PERPLEX_OPTIONS
+    pt_range: dict | None = None  # overrides the database P-T range (bar, K)
+    phase_modes: bool = False  # second WERAMI pass: volume modes of all phases
+
+
+# WERAMI answers after the project name for a 2-D grid of the modes of all phases (mode 25).
+PHASE_MODES_WERAMI_INPUT_SEQUENCE = ("2", "25", "n", "n", "1", "0")
 
 
 @dataclass(frozen=True)
@@ -255,6 +261,29 @@ def planetprofile_first_axis_from_config(model: dict) -> str:
 def is_component_composition_data(data: dict) -> bool:
     basis = str(data.get("composition_basis", "")).strip().lower().replace("-", "_")
     return basis in COMPONENT_COMPOSITION_ALIASES or "component_order" in data
+
+
+def pt_range_from_config(value: object, project: str) -> dict | None:
+    if value is None:
+        return None
+    try:
+        pt = {
+            "pressure_bar": {k: float(value["pressure_bar"][k]) for k in ("min", "max")},
+            "temperature_k": {k: float(value["temperature_k"][k]) for k in ("min", "max")},
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(
+            f"pt_range of {project} must look like "
+            '{"pressure_bar": {"min": ..., "max": ...}, "temperature_k": {"min": ..., "max": ...}}'
+        ) from exc
+    for axis, bounds in pt.items():
+        if not 0 < bounds["min"] < bounds["max"]:
+            raise ValueError(f"pt_range of {project}: {axis} needs 0 < min < max, got {bounds}")
+    return pt
+
+
+def effective_pt_range(model: ModelConfig) -> dict:
+    return model.pt_range or DATABASES[model.database].pt_range
 
 
 def register_config_databases(data: dict, base_dir: Path) -> None:
@@ -417,6 +446,8 @@ def load_config(
                 composition_interpretation=model.get("composition_interpretation"),
                 werami_input_sequence=werami_sequence_from_config(model, model_database),
                 perplex_options=model_perplex_options,
+                pt_range=pt_range_from_config(model.get("pt_range"), project),
+                phase_modes=bool(model.get("phase_modes", data.get("phase_modes", False))),
             )
         )
 
@@ -875,7 +906,14 @@ def validate_thermodynamic_setup(perplex_dir: Path, model: ModelConfig) -> None:
 
     # Validate PT range consistency (warning only, not fatal)
     db_config = DATABASES[model.database]
-    template_pt = extract_pt_range_from_template(model.build_input_file)
+    if "${P_RANGE_BAR}" in model.build_input_file.read_text():
+        pt = effective_pt_range(model)
+        template_pt = (
+            (pt["pressure_bar"]["min"], pt["pressure_bar"]["max"]),
+            (pt["temperature_k"]["min"], pt["temperature_k"]["max"]),
+        )
+    else:
+        template_pt = extract_pt_range_from_template(model.build_input_file)
     if template_pt:
         (template_p_min, template_p_max), (template_t_min, template_t_max) = template_pt
         config_p_min = db_config.pt_range["pressure_bar"]["min"]
@@ -920,7 +958,7 @@ def build_template_provenance(perplex_dir: Path, model: ModelConfig) -> dict:
         "database_file": str(database_path(perplex_dir, model.database)),
         "solution_model_file": str(solution_model_path(perplex_dir, model.database)),
         "database_declared_components": database_components,
-        "p_t_range": db.pt_range,
+        "p_t_range": effective_pt_range(model),
         "excluded_phases": list(db.excluded_phases),
         "solution_models": list(db.solution_models),
         "perplex_options": {
@@ -967,6 +1005,9 @@ def render_build_input(perplex_dir: Path, model: ModelConfig) -> str:
         "${THERMODYNAMIC_DATABASE_FILE}": template_path(database_path(perplex_dir, model.database)),
         "${SOLUTION_MODEL_FILE}": template_path(solution_model_path(perplex_dir, model.database)),
     }
+    pt = effective_pt_range(model)
+    replacements["${P_RANGE_BAR}"] = f"{pt['pressure_bar']['min']:g} {pt['pressure_bar']['max']:g}"
+    replacements["${T_RANGE_K}"] = f"{pt['temperature_k']['min']:g} {pt['temperature_k']['max']:g}"
     if "${PERPLEX_BULK_VALUES}" in text:
         replacements["${PERPLEX_BULK_VALUES}"] = composition_bulk_values(
             model.composition_file,
@@ -1052,6 +1093,25 @@ def run_werami(perplex_dir: Path, model: ModelConfig) -> Path:
     return planetprofile_tab
 
 
+def run_werami_phase_modes(perplex_dir: Path, model: ModelConfig) -> Path:
+    """Second WERAMI pass: volume % of every phase on the same grid, as <project>_phase_modes.tab."""
+    print(f"Running WERAMI (phase modes) for {model.project}")
+    before = set(model.work_dir.glob(f"{model.project}_*.tab"))
+    run_command(
+        executable=executable_path(perplex_dir, "werami"),
+        stdin_text=f"{model.project}\n" + "\n".join(PHASE_MODES_WERAMI_INPUT_SEQUENCE) + "\n",
+        cwd=model.work_dir,
+        log_path=model.output_dir / "werami_phase_modes.log",
+        label="WERAMI phase modes",
+    )
+    new_tabs = sorted(set(model.work_dir.glob(f"{model.project}_*.tab")) - before, key=lambda path: path.stat().st_mtime)
+    if not new_tabs:
+        raise FileNotFoundError(f"WERAMI phase-mode pass wrote no new table in {model.work_dir}")
+    destination = model.output_dir / f"{model.project}_phase_modes.tab"
+    shutil.copy2(new_tabs[-1], destination)
+    return destination
+
+
 def format_tab_value(value: float) -> str:
     if value != value:
         return "NaN"
@@ -1092,6 +1152,8 @@ def run_model(perplex_dir: Path, model: ModelConfig, *, skip_validation: bool = 
     try: 
         run_vertex(perplex_dir, model)
         tab_path = run_werami(perplex_dir, model)
+        if model.phase_modes:
+            run_werami_phase_modes(perplex_dir, model)
     except Exception as e:
         # Write a failed validation report before re-raising
         validation_report_path = model.output_dir / "validation_report.txt"
@@ -1130,6 +1192,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Run BUILD/VERTEX/WERAMI but skip output validation.",
     )
+    parser.add_argument(
+        "--phase-modes",
+        action="store_true",
+        help="Also write <project>_phase_modes.tab (volume %% of every phase) with a second WERAMI pass.",
+    )
     return parser.parse_args(argv)
 
 
@@ -1150,6 +1217,8 @@ def main(argv: list[str] | None = None) -> int:
             raise PipelineError(f"Project not found in config: {args.project}")
 
         for model in selected:
+            if args.phase_modes:
+                model = replace(model, phase_modes=True)
             run_model(config.perplex_dir, model, skip_validation=args.skip_validation)
     except (
         FileNotFoundError,

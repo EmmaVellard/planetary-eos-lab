@@ -46,6 +46,47 @@
         "K2O": 0.0,
         "P2O5": 0.0
       }
+    },
+    {
+      "project": "moon_w05_preferred_lowT_stx24_example",
+      "description": "Example: Ti-free Warren (2005) Preferred BSM with stx24 at crust and cold-lithosphere conditions (300-900 K, 0.1-1.3 GPa), with phase modes",
+      "database": "stx24",
+      "oxides_wt_percent": {
+        "SiO2": 47.2,
+        "TiO2": 0.18,
+        "Al2O3": 3.9,
+        "Cr2O3": 0.0,
+        "FeO": 9.32,
+        "MnO": 0.0,
+        "NiO": 0.0,
+        "MgO": 36.31,
+        "CaO": 3.09,
+        "Na2O": 0.0,
+        "K2O": 0.0,
+        "H2O": 0.0,
+        "P2O5": 0.0
+      },
+      "excluded_oxides": [
+        "TiO2"
+      ],
+      "pt_range": {
+        "pressure_bar": {
+          "min": 1000,
+          "max": 13000
+        },
+        "temperature_k": {
+          "min": 300,
+          "max": 900
+        }
+      },
+      "phase_modes": true,
+      "scientific_status": "literature_based",
+      "model_scope": "bulk_silicate_body",
+      "composition_class": "published_bsm_reference",
+      "planetprofile_readiness": "not_assessed_for_planetprofile_science",
+      "composition_interpretation": "Low-temperature diagnostic of a bulk silicate Moon composition; not a crust composition.",
+      "literature_proxy": true,
+      "source_note": "Warren, P. H. (2005). \"New\" lunar meteorites: Implications for composition of the global lunar surface, lunar crust, and the bulk Moon. Meteoritics & Planetary Science, 40(3), 477-506. DOI: 10.1111/j.1945-5100.2005.tb00395.x. Table 6 row 'Same, excluding 1.2 wt% core'. Machine-readable transformation record is in the source_transformation block below."
     }
   ]
 }
