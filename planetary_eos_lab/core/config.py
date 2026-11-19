@@ -56,7 +56,8 @@ DATABASES = {
         name="stx24",
         database_file="stx24ver.dat",
         solution_model_file="stx24_solution_model.dat",
-        excluded_phases=(),
+        # stx24ver.dat (Perple_X 7.2.13+): exclude O2 except for calculations as a function of f(O2) or a(O2)
+        excluded_phases=("O2",),
         solution_models=DEFAULT_SOLUTION_MODELS,
         pt_range={"pressure_bar": {"min": 1000.0, "max": 50000.0}, "temperature_k": {"min": 300.0, "max": 2200.0}},
         description=(

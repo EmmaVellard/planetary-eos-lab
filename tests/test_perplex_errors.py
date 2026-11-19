@@ -39,3 +39,19 @@ def test_a_one_node_werami_table_is_rejected(tmp_path: Path) -> None:
         run_perplex.check_werami_grid(tab)
     tab.write_text("|6.6.6\nrock_1.tab\n 2\nP(bar)\n 40000\n 167.2\n 300\nT(K)\n 500\n 5.01\n 300\n 9\n")
     run_perplex.check_werami_grid(tab)  # a normal header passes
+
+
+def test_file_names_longer_than_perplex_reads_are_refused() -> None:
+    long_name = "/Users/someone/" + "x" * 80 + "/datafiles/stx24ver.dat"
+    with pytest.raises(run_perplex.PipelineError, match="at most 100 characters"):
+        run_perplex.check_perplex_file_names(f"project\n{long_name}\n\nn\n")
+    run_perplex.check_perplex_file_names("project\n/Users/someone/perplex/datafiles/stx24ver.dat\n")
+
+
+def test_cleaning_a_project_leaves_options_and_other_projects(tmp_path: Path) -> None:
+    names = ["p.dat", "p.blk", "p_1.tab", "p_12.tab", "p_auto_refine.txt", "p_seismic_data.txt",
+             "perplex_option.dat", "p_other.dat", "p_other_1.tab", "p.json.bak"]
+    for name in names:
+        (tmp_path / name).write_text("x")
+    run_perplex.clean_project_work_files(tmp_path, "p")
+    assert sorted(f.name for f in tmp_path.iterdir()) == ["p.json.bak", "p_other.dat", "p_other_1.tab", "perplex_option.dat"]

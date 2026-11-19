@@ -78,3 +78,14 @@ def test_main_fails_without_reference_file(tmp_path: Path) -> None:
 def test_main_fails_when_werami_writes_no_table(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(selftest.tempfile, "tempdir", str(tmp_path))  # failed runs keep their logs
     assert selftest.main(["--perplex-dir", str(make_fake_perplex(tmp_path, no_tab=True))]) == 1
+
+
+def test_old_stx24_files_are_flagged(tmp_path) -> None:
+    from planetary_eos_lab.cli.selftest import stx24_predates_correction
+
+    old, new, older = tmp_path / "old.dat", tmp_path / "new.dat", tmp_path / "older.dat"
+    old.write_text("719 DO NOT DELETE THIS LINE\n")
+    new.write_text("730 DO NOT DELETE THIS LINE\n")
+    older.write_text("\n | comments\n")
+    assert stx24_predates_correction(old) and stx24_predates_correction(older)
+    assert not stx24_predates_correction(new)

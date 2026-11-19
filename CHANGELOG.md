@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--database` accepts any registered database; lunar BUILD templates take their P–T range from
   `${P_RANGE_BAR}` and `${T_RANGE_K}`.
 - numpy is a declared dependency.
+- stx24 excludes O2 (required by the corrected stx24 of Perple_X 7.2.13+; no effect beyond numerical noise with 7.2.5);
+  the self-test warns about a pre-correction `stx24ver.dat`.
+- WERAMI runs adapt to Perple_X versions that ask whether to include fluids (the answers are rerun with 'n');
+  BUILD errors when it cannot open a file, and file names longer than Perple_X's 100 characters are refused.
+- Cleaning a project's work files no longer removes `perplex_option.dat` or another project's files.
 - `sample_on_grid` now defaults to true (pipeline and GUI): with false, WERAMI asks for grid nodes that the
   default answers do not provide, and the run never ends.
 

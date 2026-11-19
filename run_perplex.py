@@ -12,7 +12,7 @@ from pathlib import Path
 from planetary_eos_lab.core.config import DATABASES, register_custom_databases
 from planetary_eos_lab.core.database_utils import get_database_components, get_source_only_oxides
 from planetprofile_tables import write_planetprofile_native_table
-from validate_tab import column_indices, read_tab, validate_project_output
+from validate_tab import canonical_column, column_indices, find_header_line, read_tab, validate_project_output
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -234,6 +234,15 @@ class ModelConfig:
 # the fluid or melt fraction appears in the table.
 PHASE_MODES_WERAMI_INPUT_SEQUENCE = ("2", "25", "n", "n", "1", "0")
 PHASE_MODES_WITH_FLUID_WERAMI_INPUT_SEQUENCE = ("2", "25", "n", "y", "n", "1", "0")
+
+
+def phase_modes_sequence_for_model(model: ModelConfig) -> tuple[str, ...]:
+    """The database's mode-25 answers, plus the fluid answer when the property pass was asked about fluids."""
+    sequence = phase_modes_sequence_for_database(model.database)
+    log_path = model.output_dir / "werami.log"
+    if log_path.exists() and FLUID_PROMPT in log_path.read_text(errors="replace"):
+        sequence = sequence_with_fluid_answer(sequence, "y")
+    return sequence
 
 
 def phase_modes_sequence_for_database(database: str) -> tuple[str, ...]:
@@ -588,9 +597,23 @@ def project_dat_file(work_dir: Path, project: str) -> Path:
     return work_dir / f"{project}.dat"
 
 
+def is_project_output(name: str, project: str) -> bool:
+    """Files Perple_X writes for a project: <project>.<ext>, <project>_<n>.tab and <project>_<suffix>.txt."""
+    if not name.startswith(project):
+        return False
+    rest = name[len(project):]
+    if rest.startswith(".") and "." not in rest[1:]:
+        return True
+    if rest.startswith("_") and rest.endswith(".tab") and rest[1:-4].isdigit():
+        return True
+    return rest in ("_auto_refine.txt", "_seismic_data.txt")
+
+
 def clean_project_work_files(work_dir: Path, project: str) -> None:
+    # Only this project's outputs: a plain prefix match would also remove perplex_option.dat (project "p")
+    # or another project's files (project "moon" next to "moon_w05").
     for path in work_dir.glob(f"{project}*"):
-        if path.is_file():
+        if path.is_file() and is_project_output(path.name, project):
             path.unlink()
 
 
@@ -1065,6 +1088,20 @@ def render_build_input(perplex_dir: Path, model: ModelConfig) -> str:
     return text
 
 
+PERPLEX_MAX_FILE_NAME = 100  # Perple_X stores file names in character*100 variables
+
+
+def check_perplex_file_names(build_text: str) -> None:
+    """Perple_X cuts longer file names, cannot open the file, and the rest of the answers shift."""
+    for line in build_text.splitlines():
+        name = line.strip()
+        if name.endswith(".dat") and "/" in name and len(name) > PERPLEX_MAX_FILE_NAME:
+            raise PipelineError(
+                f"Perple_X reads file names of at most {PERPLEX_MAX_FILE_NAME} characters; this one has {len(name)}: "
+                f"{name}. Move Perple_X to a folder with a shorter path, or point perplex_dir to a shorter symbolic link."
+            )
+
+
 def run_build(perplex_dir: Path, model: ModelConfig) -> None:
     log_path = model.output_dir / "build.log"
     dat_file = project_dat_file(model.work_dir, model.project)
@@ -1078,13 +1115,23 @@ def run_build(perplex_dir: Path, model: ModelConfig) -> None:
 
     print(f"Running BUILD for {model.project}")
     clean_project_work_files(model.work_dir, model.project)
+    build_executable = executable_path(perplex_dir, "build")
+    build_text = render_build_input(perplex_dir, model)
+    if not is_python_script(build_executable):  # the limit is the real BUILD's; test stand-ins are scripts
+        check_perplex_file_names(build_text)
     run_command(
-        executable=executable_path(perplex_dir, "build"),
-        stdin_text=render_build_input(perplex_dir, model),
+        executable=build_executable,
+        stdin_text=build_text,
         cwd=model.work_dir,
         log_path=log_path,
         label="BUILD",
     )
+    build_output = log_path.read_text(errors="replace") if log_path.exists() else ""
+    if "cannot find file" in build_output:  # BUILD then asks "try again?" and the remaining answers shift
+        raise PipelineError(
+            f"BUILD could not open a file named in the template (see 'cannot find file' in {log_path}); "
+            "the .dat it wrote is not usable."
+        )
 
     if not dat_file.exists():
         raise FileNotFoundError(f"BUILD completed but did not create expected .dat file: {dat_file}")
@@ -1110,20 +1157,54 @@ def run_vertex(perplex_dir: Path, model: ModelConfig) -> None:
     )
 
 
+FLUID_PROMPT = "Include fluid in computation of aggregate"
+
+
+def sequence_with_fluid_answer(sequence: tuple[str, ...], answer: str) -> tuple[str, ...]:
+    """Insert the answer to WERAMI's 'include fluid?' question after the system-properties choice."""
+    if sequence[:3] == ("2", "38", "1") and sequence[3:4] not in (("n",), ("y",)):
+        return sequence[:3] + (answer,) + sequence[3:]
+    if sequence[:3] == ("2", "25", "n") and len(sequence) == len(PHASE_MODES_WERAMI_INPUT_SEQUENCE):
+        return sequence[:3] + (answer,) + sequence[3:]
+    return sequence
+
+
+def werami_tab_missing_columns(tab_path: Path) -> list[str]:
+    found_header = find_header_line(tab_path.read_text(errors="replace").splitlines())
+    if found_header is None:
+        return []  # not a property table WERAMI wrote in the usual layout: left to the table validation
+    found = {canonical_column(label) for label in found_header[1]}
+    return [name for name in ("rho_kgm3", "vp_kms", "vs_kms", "cp_jm3k", "alpha_pk", "ks_bar", "gs_bar") if name not in found]
+
+
 def run_werami(perplex_dir: Path, model: ModelConfig) -> Path:
     print(f"Running WERAMI for {model.project}")
-    run_command(
-        executable=executable_path(perplex_dir, "werami"),
-        stdin_text=werami_input_text(model),
-        cwd=model.work_dir,
-        log_path=model.output_dir / "werami.log",
-        label="WERAMI",
-    )
-
     raw_tab = model.work_dir / f"{model.project}_1.tab"
-    if not raw_tab.exists():
-        raise FileNotFoundError(f"WERAMI completed but expected table was not found: {raw_tab}")
-    check_werami_grid(raw_tab)
+    log_path = model.output_dir / "werami.log"
+    sequence = model.werami_input_sequence
+    for attempt in range(2):
+        raw_tab.unlink(missing_ok=True)
+        run_command(
+            executable=executable_path(perplex_dir, "werami"),
+            stdin_text=f"{model.project}\n" + "\n".join(sequence) + "\n",
+            cwd=model.work_dir,
+            log_path=log_path,
+            label="WERAMI",
+        )
+        if not raw_tab.exists():
+            raise FileNotFoundError(f"WERAMI completed but expected table was not found: {raw_tab}")
+        check_werami_grid(raw_tab)
+        missing = werami_tab_missing_columns(raw_tab)
+        if not missing:
+            break
+        # Some Perple_X versions ask whether to include fluids (e.g. stx24 from 7.3): the property
+        # answers then shift by one. Answer "n" (aggregate properties of the solid assemblage) and rerun.
+        retry = sequence_with_fluid_answer(sequence, "n")
+        if attempt == 0 and FLUID_PROMPT in log_path.read_text(errors="replace") and retry != sequence:
+            print(f"WERAMI asked whether to include fluids for {model.project}: answering 'n' and running again")
+            sequence = retry
+            continue
+        raise PipelineError(f"WERAMI table {raw_tab} lacks {', '.join(missing)}: its answers did not match. See {log_path}")
 
     raw_copy = model.output_dir / f"{model.project}_raw_werami.tab"
     shutil.copy2(raw_tab, raw_copy)
@@ -1162,7 +1243,7 @@ def run_werami_phase_modes(perplex_dir: Path, model: ModelConfig) -> Path:
     before = set(model.work_dir.glob(f"{model.project}_*.tab"))
     run_command(
         executable=executable_path(perplex_dir, "werami"),
-        stdin_text=f"{model.project}\n" + "\n".join(phase_modes_sequence_for_database(model.database)) + "\n",
+        stdin_text=f"{model.project}\n" + "\n".join(phase_modes_sequence_for_model(model)) + "\n",
         cwd=model.work_dir,
         log_path=model.output_dir / "werami_phase_modes.log",
         label="WERAMI phase modes",

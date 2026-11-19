@@ -119,12 +119,21 @@ def check_perplex(report: Report, perplex_dir: Path | None) -> str | None:
     return version or "unknown"
 
 
+def stx24_predates_correction(path: Path) -> bool:
+    """Perple_X data files start with a version line ("730 DO NOT DELETE THIS LINE"); stx24 was corrected in 7.2.13."""
+    first = path.read_text(errors="replace").split("\n", 1)[0].split()
+    return not first or not first[0].isdigit() or int(first[0]) < 720
+
+
 def check_databases(report: Report, perplex_dir: Path) -> bool:
     """Check data files of every built-in database; return True if the default (stx21) is complete."""
     default_ok = True
     for name, db in DATABASES.items():
         missing = [f for f in (db.database_file, db.solution_model_file) if not (perplex_dir / "datafiles" / f).is_file()]
-        if not missing:
+        if not missing and name == "stx24" and stx24_predates_correction(perplex_dir / "datafiles" / db.database_file):
+            report.line("WARN", f"database {name}", "stx24ver.dat predates the stx24 correction of Perple_X 7.2.13 "
+                        "(October 2026): update Perple_X before using stx24")
+        elif not missing:
             report.line("PASS", f"database {name}", f"{db.database_file}, {db.solution_model_file}")
         elif name == DEFAULT_DATABASE:
             report.line("FAIL", f"database {name}", f"missing in datafiles/: {', '.join(missing)} (default database)")

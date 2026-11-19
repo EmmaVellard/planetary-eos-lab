@@ -12,7 +12,7 @@ The included Moon near-side/far-side models are example smoke tests. They are us
 
 ### Prerequisites
 - Python 3.10 or later
-- [Perple_X](https://github.com/jadconnolly/Perple_X) installed locally (tested with Perple_X 7.2.5, June 2026)
+- [Perple_X](https://github.com/jadconnolly/Perple_X) installed locally (tested with Perple_X 7.2.5 and 7.3.3; use 7.2.13 or later for stx24, see below). Perple_X reads file names of at most 100 characters: keep its folder path short
 - Docker (optional, for containerized usage)
 
 ### Quick Install
@@ -134,8 +134,13 @@ Do not edit generated files in `compositions/` or `outputs/` as the source of tr
 **stx24** - Stixrude & Lithgow-Bertelloni 2024
 - Modeled oxides: Na2O, MgO, Al2O3, SiO2, CaO, FeO, Cr2O3
 - FeO is passed to BUILD as the components Fe + O (split by their molar weights in `stx24ver.dat`; iron taken as ferrous), so Perple_X computes the Fe2+/Fe3+ partitioning
-- Template range: 0.1-5 GPa, 300-2200 K; no excluded phase
+- Template range: 0.1-5 GPa, 300-2200 K; O2 excluded, as the data file asks since Perple_X 7.2.13
 - Database files: `stx24ver.dat`, `stx24_solution_model.dat`
+- Perple_X 7.2.13 (October 2026) corrected the stx24 data and solution models; use 7.2.13 or later
+  (`planetary-eos-selftest` warns about an older `stx24ver.dat`). For the three lunar BSMs (50 × 50 nodes,
+  0.1–5 GPa, 300–2200 K), 7.3.3 against 7.2.5: density, Vp and Vs differ by 0.01 % on average; the
+  plagioclase–spinel–garnet transitions (0.8–1.6 GPa, 900–1500 K) move slightly, changing the assemblage
+  at about 1 % of the nodes, where density differs by up to 1.2 % and Gs by up to 5 %.
 - The template was reconstructed in November 2026; tables rebuilt with it differ from the August 2026 lunar tables on about 5 % of the nodes (median relative difference 1e-5)
 
 **hp636** - Holland & Powell data set v6.36

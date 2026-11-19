@@ -21,7 +21,10 @@ ${T_RANGE_K}
 y
 ${PERPLEX_BULK_VALUES}
 n
+y
 n
+O2
+
 y
 ${PERPLEX_DIR}/datafiles/stx24_solution_model.dat
 O
