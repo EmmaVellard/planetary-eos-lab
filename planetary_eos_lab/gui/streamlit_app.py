@@ -1375,6 +1375,10 @@ def append_command_log(log_path: Path, text: str) -> None:
         log_file.write(text)
 
 
+def job_history_timestamp() -> str:
+    return time.strftime("%Y%m%d-%H%M%S")
+
+
 def command_log_tail(log_path: Path, max_bytes: int = 24000) -> str:
     if not log_path.exists():
         return ""
@@ -1388,6 +1392,21 @@ def command_log_tail(log_path: Path, max_bytes: int = 24000) -> str:
 def command_log_current_section(log_text: str) -> str:
     sections = log_text.split("\n\n=== ")
     return sections[-1] if sections else log_text
+
+
+def command_exit_codes_from_log(log_path: Path) -> list[int]:
+    if not log_path.exists():
+        return []
+    codes: list[int] = []
+    for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        prefix = "Command exited with return code "
+        if not line.startswith(prefix):
+            continue
+        try:
+            codes.append(int(line.removeprefix(prefix).rstrip(".")))
+        except ValueError:
+            continue
+    return codes
 
 
 def streamlit_job_is_running() -> bool:
@@ -1429,11 +1448,33 @@ def launch_current_streamlit_command() -> None:
         job["status"] = "failed"
         job["message"] = f"Could not start {label}: {exc}"
         append_command_log(log_path, f"Could not start command: {exc}\n")
+        update_persistent_job_status(
+            str(job.get("job_id", "unknown")),
+            "failed",
+            message=job["message"],
+            last_update=job_history_timestamp(),
+            pid=None,
+            process_group_id=None,
+        )
         return
 
     job["process"] = process
     job["current_label"] = label
     job["message"] = f"Running {label}"
+    job["pid"] = process.pid
+    job["process_group_id"] = process.pid
+    job["last_update"] = job_history_timestamp()
+    update_persistent_job_status(
+        str(job.get("job_id", "unknown")),
+        "running",
+        index=index,
+        completed=int(job.get("completed", 0)),
+        current_label=label,
+        message=job["message"],
+        pid=process.pid,
+        process_group_id=process.pid,
+        last_update=job["last_update"],
+    )
 
 
 def start_streamlit_command_job(commands: list[PipelineCommand], *, job_label: str) -> None:
@@ -1443,8 +1484,8 @@ def start_streamlit_command_job(commands: list[PipelineCommand], *, job_label: s
         st.warning("A command is already running. Kill or finish it before starting another one.")
         return
 
-    timestamp = time.strftime("%Y%m%d-%H%M%S")
-    job_id = f"job_{timestamp}"
+    timestamp = job_history_timestamp()
+    job_id = f"job_{timestamp}_{time.time_ns() % 1_000_000:06d}"
     log_path = REPO_ROOT / "outputs" / "streamlit_runs" / f"{job_label.lower().replace(' ', '_')}_{timestamp}.log"
     job = {
         "job_id": job_id,
@@ -1458,6 +1499,9 @@ def start_streamlit_command_job(commands: list[PipelineCommand], *, job_label: s
         "log_path": str(log_path),
         "process": None,
         "start_time": timestamp,
+        "last_update": timestamp,
+        "pid": None,
+        "process_group_id": None,
     }
     st.session_state[RUNNING_COMMAND_JOB_KEY] = job
     # Save to persistent storage (without the process object and with serializable commands)
@@ -1504,6 +1548,47 @@ def remove_persistent_job(job_id: str) -> None:
         save_persistent_jobs(jobs)
 
 
+def kill_persistent_job(job_id: str) -> None:
+    """Kill a running job by its ID."""
+    jobs = load_persistent_jobs()
+    if job_id not in jobs:
+        return
+
+    job = jobs[job_id]
+    if job.get("status") != "running":
+        return
+
+    # Try to kill by PID
+    pid = job.get("pid")
+    if pid:
+        try:
+            pid_int = int(pid)
+            # Try to kill the process group first
+            try:
+                os.killpg(pid_int, signal.SIGTERM)
+            except (AttributeError, ProcessLookupError, OSError):
+                os.kill(pid_int, signal.SIGTERM)
+
+            # Give it a moment, then force kill if needed
+            import time
+            time.sleep(1)
+            if process_is_running(pid_int):
+                try:
+                    os.killpg(pid_int, signal.SIGKILL)
+                except (AttributeError, ProcessLookupError, OSError):
+                    os.kill(pid_int, signal.SIGKILL)
+        except (ValueError, ProcessLookupError, OSError):
+            pass
+
+    # Update status
+    update_persistent_job_status(
+        job_id,
+        "killed",
+        message="Killed from run history",
+        last_update=job_history_timestamp(),
+    )
+
+
 def update_persistent_job_status(job_id: str, status: str, **kwargs: Any) -> None:
     """Update a job's status in persistent storage."""
     jobs = load_persistent_jobs()
@@ -1511,6 +1596,92 @@ def update_persistent_job_status(job_id: str, status: str, **kwargs: Any) -> Non
         jobs[job_id]["status"] = status
         jobs[job_id].update(kwargs)
         save_persistent_jobs(jobs)
+
+
+def process_is_running(pid: object) -> bool:
+    try:
+        pid_int = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid_int <= 0:
+        return False
+    try:
+        os.kill(pid_int, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def active_session_job_id() -> str | None:
+    job = st.session_state.get(RUNNING_COMMAND_JOB_KEY)
+    if not isinstance(job, dict) or job.get("status") != "running":
+        return None
+    return str(job.get("job_id", "")) or None
+
+
+def reconciled_persistent_jobs() -> dict[str, dict[str, Any]]:
+    jobs = load_persistent_jobs()
+    if not jobs:
+        return {}
+
+    active_job_id = active_session_job_id()
+    changed = False
+    for job_id, job in jobs.items():
+        if str(job.get("status", "")) != "running":
+            continue
+
+        commands = job.get("commands", [])
+        total = int(job.get("total_commands") or len(commands) or 0)
+        log_path = Path(str(job.get("log_path", "")))
+        exit_codes = command_exit_codes_from_log(log_path)
+        successful_commands = sum(1 for code in exit_codes if code == 0)
+        if successful_commands > int(job.get("completed", 0)):
+            job["completed"] = min(successful_commands, total) if total else successful_commands
+            job["index"] = job["completed"]
+            changed = True
+
+        if total and len(exit_codes) >= total and all(code == 0 for code in exit_codes[:total]):
+            job["status"] = "complete"
+            job["message"] = f"Finished {total}/{total} run(s)."
+            job["completed"] = total
+            job["index"] = total
+            job["pid"] = None
+            job["process_group_id"] = None
+            job["last_update"] = job_history_timestamp()
+            changed = True
+            continue
+
+        if exit_codes and exit_codes[-1] != 0:
+            job["status"] = "failed"
+            job["message"] = f"Stopped after {successful_commands}/{total or len(commands)} completed run(s)."
+            job["pid"] = None
+            job["process_group_id"] = None
+            job["last_update"] = job_history_timestamp()
+            changed = True
+            continue
+
+        if active_job_id == job_id:
+            continue
+
+        if process_is_running(job.get("pid")):
+            continue
+
+        job["status"] = "interrupted"
+        job["message"] = (
+            "Run history lost live process tracking. Check the log and outputs before rerunning remaining models."
+        )
+        job["pid"] = None
+        job["process_group_id"] = None
+        job["last_update"] = job_history_timestamp()
+        changed = True
+
+    if changed:
+        save_persistent_jobs(jobs)
+    return jobs
 
 
 def poll_streamlit_command_job() -> dict[str, Any] | None:
@@ -1541,15 +1712,39 @@ def poll_streamlit_command_job() -> dict[str, Any] | None:
         if int(job["index"]) >= len(commands):
             job["status"] = "complete"
             job["message"] = f"Finished {job['completed']}/{len(commands)} run(s)."
-            update_persistent_job_status(job_id, "complete", message=job["message"], completed=job["completed"])
+            update_persistent_job_status(
+                job_id,
+                "complete",
+                message=job["message"],
+                completed=job["completed"],
+                index=job["index"],
+                pid=None,
+                process_group_id=None,
+                last_update=job_history_timestamp(),
+            )
         else:
-            update_persistent_job_status(job_id, "running", completed=job["completed"], index=job["index"])
+            update_persistent_job_status(
+                job_id,
+                "running",
+                completed=job["completed"],
+                index=job["index"],
+                pid=None,
+                process_group_id=None,
+                last_update=job_history_timestamp(),
+            )
             launch_current_streamlit_command()
         return job
 
     job["status"] = "failed"
     job["message"] = f"Stopped after {job.get('completed', 0)}/{len(job.get('commands', []))} completed run(s)."
-    update_persistent_job_status(job_id, "failed", message=job["message"])
+    update_persistent_job_status(
+        job_id,
+        "failed",
+        message=job["message"],
+        pid=None,
+        process_group_id=None,
+        last_update=job_history_timestamp(),
+    )
     return job
 
 
@@ -1576,7 +1771,14 @@ def terminate_streamlit_command_job() -> None:
     job["message"] = "Run killed by user."
     job["process"] = None
     job_id = str(job.get("job_id", "unknown"))
-    update_persistent_job_status(job_id, "killed", message=job["message"])
+    update_persistent_job_status(
+        job_id,
+        "killed",
+        message=job["message"],
+        pid=None,
+        process_group_id=None,
+        last_update=job_history_timestamp(),
+    )
     append_command_log(Path(str(job["log_path"])), "\nRun killed by user.\n")
 
 
@@ -1721,39 +1923,49 @@ def show_streamlit_command_job() -> None:
 
 
 def show_persistent_jobs() -> None:
-    """Show all persistent jobs from disk."""
-    jobs = load_persistent_jobs()
+    """Show local run history from disk."""
+    jobs = reconciled_persistent_jobs()
     if not jobs:
         return
 
-    st.divider()
-    st.subheader("All Jobs")
-    st.caption("Jobs persist even when the page is closed")
+    st.subheader("Run History")
+    st.caption("Local history of runs started from this app. Active run controls stay on the run page.")
 
     for job_id, job in sorted(jobs.items(), key=lambda x: x[1].get("start_time", ""), reverse=True):
         status = str(job.get("status", "unknown"))
         job_label = str(job.get("job_label", "Job"))
         start_time = str(job.get("start_time", ""))
         completed = int(job.get("completed", 0))
-        total = len(job.get("commands", []))
+        total = int(job.get("total_commands") or len(job.get("commands", [])))
 
-        status_emoji = {"running": "🔄", "complete": "✅", "failed": "❌", "killed": "⏹️"}.get(status, "❓")
+        status_label = {
+            "running": "Running",
+            "complete": "Complete",
+            "failed": "Failed",
+            "killed": "Killed",
+            "interrupted": "Interrupted",
+        }.get(status, "Unknown")
+        with st.expander(f"{job_label} - {status_label} - {start_time} ({completed}/{total})"):
+            st.caption(f"**Status:** {status}")
+            st.caption(f"**Progress:** {completed}/{total} commands")
+            if job.get("current_label") and status == "running":
+                st.caption(f"**Current:** {job['current_label']}")
+            if job.get("message"):
+                st.caption(f"**Message:** {job['message']}")
+            if job.get("last_update"):
+                st.caption(f"**Last update:** {job['last_update']}")
+            log_path = Path(str(job.get("log_path", "")))
+            if log_path.exists():
+                st.caption(f"**Log:** `{log_path}`")
 
-        with st.expander(f"{status_emoji} {job_label} - {start_time} ({completed}/{total})"):
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                st.caption(f"**Status:** {status}")
-                st.caption(f"**Progress:** {completed}/{total} commands")
-                if job.get("message"):
-                    st.caption(f"**Message:** {job['message']}")
-                log_path = Path(str(job.get("log_path", "")))
-                if log_path.exists():
-                    st.caption(f"**Log:** `{log_path}`")
-            with col2:
-                if status in ("complete", "failed", "killed"):
-                    if st.button("Remove", key=f"remove_job_{job_id}", type="secondary"):
-                        remove_persistent_job(job_id)
-                        st.rerun()
+            if status == "running":
+                if st.button("Kill Run", key=f"kill_job_{job_id}", type="primary"):
+                    kill_persistent_job(job_id)
+                    st.rerun()
+            elif status in ("complete", "failed", "killed", "interrupted"):
+                if st.button("Remove", key=f"remove_job_{job_id}", type="secondary"):
+                    remove_persistent_job(job_id)
+                    st.rerun()
 
 
 def run_streamlit_commands(commands: list[PipelineCommand], *, job_label: str = "Pipeline run") -> None:
@@ -2620,10 +2832,15 @@ def main() -> None:
             st.caption("Select saved models, compare outputs, or switch to Composition to build inputs.")
         st.divider()
 
+        show_persistent_jobs()
+
+        st.divider()
+
         # Auto-save controls
         show_autosave_controls()
 
         st.divider()
+        
         st.caption("Local configuration")
         config_input = st.text_input("Config path", value=str(DEFAULT_CONFIG_PATH.relative_to(REPO_ROOT)))
 
@@ -2656,7 +2873,6 @@ def main() -> None:
         seed_model_selector_state(selector_key, available_projects)
     with st.sidebar:
         show_sidebar_local_configuration(config_path, config, workspace_mode)
-        show_persistent_jobs()
     if not st.session_state.get("planetprofile_export_dir"):
         st.session_state["planetprofile_export_dir"] = str(DEFAULT_PLANETPROFILE_EXPORT_DIR)
 

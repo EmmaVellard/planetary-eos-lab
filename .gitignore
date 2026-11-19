@@ -37,9 +37,11 @@ MIGRATION_GUIDE.md
 
 # Files
 docs/
+.jobs/
 fits/
 fits_plots/
 fits*
+plot_fits*.py
 comparison_plots/
 compare*
 
