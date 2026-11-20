@@ -6,13 +6,13 @@ import os
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from planetary_eos_lab.core.config import DATABASES
+from planetary_eos_lab.core.config import DATABASES, register_custom_databases
 from planetary_eos_lab.core.database_utils import get_database_components, get_source_only_oxides
 from planetprofile_tables import write_planetprofile_native_table
-from validate_tab import column_indices, read_tab, validate_project_output
+from validate_tab import canonical_column, column_indices, find_header_line, read_tab, validate_project_output
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -23,6 +23,8 @@ DEFAULT_BUILD_TEMPLATES = {
     "stx21": DEFAULT_BUILD_TEMPLATE,
     "stx24": BASE_DIR / "build_inputs" / "lunar_stx24_template.build.in",
     "hp633": BASE_DIR / "build_inputs" / "lunar_hp633_template.build.in",
+    "hp636": BASE_DIR / "build_inputs" / "lunar_hp636_template.build.in",
+    "se15_fes_core": BASE_DIR / "build_inputs" / "core_se15_fes_template.build.in",
     "dew17_hhph": BASE_DIR / "build_inputs" / "icy_dew17_hhph_template.build.in",
     "hpha02_hydrous": BASE_DIR / "build_inputs" / "icy_hpha02_hydrous_simple_template.build.in",
     "dew13_hydrous": BASE_DIR / "build_inputs" / "icy_dew13_hydrous_template.build.in",
@@ -33,7 +35,7 @@ COMPONENT_COMPOSITION_ALIASES = {"perplex_components", "components", "elements",
 
 @dataclass(frozen=True)
 class PerplexOptions:
-    sample_on_grid: bool = False
+    sample_on_grid: bool = True  # False makes WERAMI ask for grid nodes, which the default answers do not give
     x_nodes: tuple[int, int] = (40, 300)
     y_nodes: tuple[int, int] = (40, 300)
     grid_levels: tuple[int, int] = (1, 4)
@@ -110,9 +112,14 @@ HP633_WERAMI_INPUT_SEQUENCE = (
     "1",
     "0",
 )
+FE_S_CORE_WERAMI_INPUT_SEQUENCE = tuple("y" if i == 3 else answer for i, answer in enumerate(HP633_WERAMI_INPUT_SEQUENCE))
 DEFAULT_WERAMI_INPUT_SEQUENCES = {
     "stx21": DEFAULT_WERAMI_INPUT_SEQUENCE,
     "hp633": HP633_WERAMI_INPUT_SEQUENCE,
+    "hp636": HP633_WERAMI_INPUT_SEQUENCE,
+    # The Fe-S liquid counts as a fluid and WERAMI asks whether to include it: "y", so molten nodes get the
+    # liquid's properties (density and Ks then match PlanetProfile's 95Fe5S_core.tab to 0.01 % and 0.07 %).
+    "se15_fes_core": FE_S_CORE_WERAMI_INPUT_SEQUENCE,
     "dew17_hhph": HP633_WERAMI_INPUT_SEQUENCE,
     "hpha02_hydrous": HP633_WERAMI_INPUT_SEQUENCE,
     "dew13_hydrous": HP633_WERAMI_INPUT_SEQUENCE,
@@ -217,6 +224,32 @@ class ModelConfig:
     composition_interpretation: str | None = None
     werami_input_sequence: tuple[str, ...] = DEFAULT_WERAMI_INPUT_SEQUENCE
     perplex_options: PerplexOptions = DEFAULT_PERPLEX_OPTIONS
+    pt_range: dict | None = None  # overrides the database P-T range (bar, K)
+    phase_modes: bool = False  # second WERAMI pass: volume modes of all phases
+
+
+# WERAMI answers after the project name for a 2-D grid of the modes of all phases (mode 25):
+# no cumulative modes, keep the variable range, the default grid. Databases with a fluid or a
+# liquid model (the hp633-style sequences) add the question "include fluid?", answered "y" so that
+# the fluid or melt fraction appears in the table.
+PHASE_MODES_WERAMI_INPUT_SEQUENCE = ("2", "25", "n", "n", "1", "0")
+PHASE_MODES_WITH_FLUID_WERAMI_INPUT_SEQUENCE = ("2", "25", "n", "y", "n", "1", "0")
+
+
+def phase_modes_sequence_for_model(model: ModelConfig) -> tuple[str, ...]:
+    """The database's mode-25 answers, plus the fluid answer when the property pass was asked about fluids."""
+    sequence = phase_modes_sequence_for_database(model.database)
+    log_path = model.output_dir / "werami.log"
+    if log_path.exists() and FLUID_PROMPT in log_path.read_text(errors="replace"):
+        sequence = sequence_with_fluid_answer(sequence, "y")
+    return sequence
+
+
+def phase_modes_sequence_for_database(database: str) -> tuple[str, ...]:
+    # hp633-style sequences answer WERAMI's "include fluid?" question in 4th position
+    if default_werami_sequence_for_database(database)[3:4] in (("n",), ("y",)):
+        return PHASE_MODES_WITH_FLUID_WERAMI_INPUT_SEQUENCE
+    return PHASE_MODES_WERAMI_INPUT_SEQUENCE
 
 
 @dataclass(frozen=True)
@@ -253,6 +286,36 @@ def planetprofile_first_axis_from_config(model: dict) -> str:
 def is_component_composition_data(data: dict) -> bool:
     basis = str(data.get("composition_basis", "")).strip().lower().replace("-", "_")
     return basis in COMPONENT_COMPOSITION_ALIASES or "component_order" in data
+
+
+def pt_range_from_config(value: object, project: str) -> dict | None:
+    if value is None:
+        return None
+    try:
+        pt = {
+            "pressure_bar": {k: float(value["pressure_bar"][k]) for k in ("min", "max")},
+            "temperature_k": {k: float(value["temperature_k"][k]) for k in ("min", "max")},
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(
+            f"pt_range of {project} must look like "
+            '{"pressure_bar": {"min": ..., "max": ...}, "temperature_k": {"min": ..., "max": ...}}'
+        ) from exc
+    for axis, bounds in pt.items():
+        if not 0 < bounds["min"] < bounds["max"]:
+            raise ValueError(f"pt_range of {project}: {axis} needs 0 < min < max, got {bounds}")
+    return pt
+
+
+def effective_pt_range(model: ModelConfig) -> dict:
+    return model.pt_range or DATABASES[model.database].pt_range
+
+
+def register_config_databases(data: dict, base_dir: Path) -> None:
+    """Register the config's custom databases with their default template and WERAMI sequence."""
+    for db in register_custom_databases(data, base_dir):
+        DEFAULT_BUILD_TEMPLATES[db.name] = Path(db.build_template)
+        DEFAULT_WERAMI_INPUT_SEQUENCES[db.name] = db.werami_input_sequence or DEFAULT_WERAMI_INPUT_SEQUENCE
 
 
 def default_werami_sequence_for_database(database: str) -> tuple[str, ...]:
@@ -358,6 +421,7 @@ def load_config(
             "and set perplex_dir to your local Perple_X install."
         )
     data = json.loads(config_path.read_text(encoding="utf-8"))
+    register_config_databases(data, base_dir)
     pipeline_database = resolve_database_name(database_override or data.get("database", DEFAULT_DATABASE))
     pipeline_perplex_options = perplex_options_from_config(data.get("perplex_options"))
     configured_build_template = data.get("build_template_file")
@@ -407,6 +471,8 @@ def load_config(
                 composition_interpretation=model.get("composition_interpretation"),
                 werami_input_sequence=werami_sequence_from_config(model, model_database),
                 perplex_options=model_perplex_options,
+                pt_range=pt_range_from_config(model.get("pt_range"), project),
+                phase_modes=bool(model.get("phase_modes", data.get("phase_modes", False))),
             )
         )
 
@@ -469,19 +535,48 @@ def write_log(log_path: Path, stdout: str, stderr: str, returncode: int, stdin_t
     )
 
 
+# Seconds after which a Perple_X program is stopped. BUILD and WERAMI only answer prompts, so a long
+# run means they are waiting for an answer the template or the WERAMI sequence does not give (they
+# then loop on the end of the input). VERTEX does the minimization and is not limited.
+# PLANETARY_EOS_PERPLEX_TIMEOUT (seconds) overrides every limit.
+COMMAND_TIMEOUTS_S = {"BUILD": 300, "WERAMI": 1800, "WERAMI phase modes": 1800}
+
+
+def last_prompt(stdout: str) -> str:
+    lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+    prompts = [line for line in lines if line.endswith(("?", ":", "]:")) or "(y/n)" in line.lower()]
+    return prompts[-1] if prompts else (lines[-1] if lines else "")
+
+
 def run_command(executable: Path, stdin_text: str, cwd: Path, log_path: Path, label: str) -> None:
     ensure_executable(executable, label)
-    result = subprocess.run(
-        executable_command(executable),
-        input=stdin_text,
-        text=True,
-        cwd=str(cwd),
-        capture_output=True,
-    )
+    timeout = os.environ.get("PLANETARY_EOS_PERPLEX_TIMEOUT")
+    timeout_s = float(timeout) if timeout else COMMAND_TIMEOUTS_S.get(label)
+    try:
+        result = subprocess.run(
+            executable_command(executable),
+            input=stdin_text,
+            text=True,
+            cwd=str(cwd),
+            capture_output=True,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired as exc:  # subprocess.run has already stopped the program
+        stdout = exc.stdout.decode(errors="replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")
+        stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        write_log(log_path, stdout[-200000:], stderr[-20000:], -1, stdin_text)
+        raise PipelineError(
+            f"{label} did not finish within {timeout_s:g} s and was stopped. It is probably waiting for an answer "
+            f"that the BUILD template or the WERAMI answers do not give. Last prompt: {last_prompt(stdout)!r}. "
+            f"See {log_path}"
+        ) from None
     write_log(log_path, result.stdout, result.stderr, result.returncode, stdin_text)
 
     if result.returncode != 0:
-        raise PipelineError(f"{label} failed with return code {result.returncode}. See {log_path}")
+        raise PipelineError(
+            f"{label} failed with return code {result.returncode}. Last prompt: {last_prompt(result.stdout)!r}. "
+            f"See {log_path}"
+        )
 
 
 def require_perplex_dir(perplex_dir: Path) -> None:
@@ -502,9 +597,23 @@ def project_dat_file(work_dir: Path, project: str) -> Path:
     return work_dir / f"{project}.dat"
 
 
+def is_project_output(name: str, project: str) -> bool:
+    """Files Perple_X writes for a project: <project>.<ext>, <project>_<n>.tab and <project>_<suffix>.txt."""
+    if not name.startswith(project):
+        return False
+    rest = name[len(project):]
+    if rest.startswith(".") and "." not in rest[1:]:
+        return True
+    if rest.startswith("_") and rest.endswith(".tab") and rest[1:-4].isdigit():
+        return True
+    return rest in ("_auto_refine.txt", "_seismic_data.txt")
+
+
 def clean_project_work_files(work_dir: Path, project: str) -> None:
+    # Only this project's outputs: a plain prefix match would also remove perplex_option.dat (project "p")
+    # or another project's files (project "moon" next to "moon_w05").
     for path in work_dir.glob(f"{project}*"):
-        if path.is_file():
+        if path.is_file() and is_project_output(path.name, project):
             path.unlink()
 
 
@@ -865,7 +974,16 @@ def validate_thermodynamic_setup(perplex_dir: Path, model: ModelConfig) -> None:
 
     # Validate PT range consistency (warning only, not fatal)
     db_config = DATABASES[model.database]
-    template_pt = extract_pt_range_from_template(model.build_input_file)
+    if db_config.caveat:
+        print(f"WARNING ({model.database}): {db_config.caveat}", file=sys.stderr)
+    if "${P_RANGE_BAR}" in model.build_input_file.read_text():
+        pt = effective_pt_range(model)
+        template_pt = (
+            (pt["pressure_bar"]["min"], pt["pressure_bar"]["max"]),
+            (pt["temperature_k"]["min"], pt["temperature_k"]["max"]),
+        )
+    else:
+        template_pt = extract_pt_range_from_template(model.build_input_file)
     if template_pt:
         (template_p_min, template_p_max), (template_t_min, template_t_max) = template_pt
         config_p_min = db_config.pt_range["pressure_bar"]["min"]
@@ -910,7 +1028,7 @@ def build_template_provenance(perplex_dir: Path, model: ModelConfig) -> dict:
         "database_file": str(database_path(perplex_dir, model.database)),
         "solution_model_file": str(solution_model_path(perplex_dir, model.database)),
         "database_declared_components": database_components,
-        "p_t_range": db.pt_range,
+        "p_t_range": effective_pt_range(model),
         "excluded_phases": list(db.excluded_phases),
         "solution_models": list(db.solution_models),
         "perplex_options": {
@@ -957,6 +1075,9 @@ def render_build_input(perplex_dir: Path, model: ModelConfig) -> str:
         "${THERMODYNAMIC_DATABASE_FILE}": template_path(database_path(perplex_dir, model.database)),
         "${SOLUTION_MODEL_FILE}": template_path(solution_model_path(perplex_dir, model.database)),
     }
+    pt = effective_pt_range(model)
+    replacements["${P_RANGE_BAR}"] = f"{pt['pressure_bar']['min']:g} {pt['pressure_bar']['max']:g}"
+    replacements["${T_RANGE_K}"] = f"{pt['temperature_k']['min']:g} {pt['temperature_k']['max']:g}"
     if "${PERPLEX_BULK_VALUES}" in text:
         replacements["${PERPLEX_BULK_VALUES}"] = composition_bulk_values(
             model.composition_file,
@@ -965,6 +1086,20 @@ def render_build_input(perplex_dir: Path, model: ModelConfig) -> str:
     for placeholder, value in replacements.items():
         text = text.replace(placeholder, value)
     return text
+
+
+PERPLEX_MAX_FILE_NAME = 100  # Perple_X stores file names in character*100 variables
+
+
+def check_perplex_file_names(build_text: str) -> None:
+    """Perple_X cuts longer file names, cannot open the file, and the rest of the answers shift."""
+    for line in build_text.splitlines():
+        name = line.strip()
+        if name.endswith(".dat") and "/" in name and len(name) > PERPLEX_MAX_FILE_NAME:
+            raise PipelineError(
+                f"Perple_X reads file names of at most {PERPLEX_MAX_FILE_NAME} characters; this one has {len(name)}: "
+                f"{name}. Move Perple_X to a folder with a shorter path, or point perplex_dir to a shorter symbolic link."
+            )
 
 
 def run_build(perplex_dir: Path, model: ModelConfig) -> None:
@@ -980,13 +1115,23 @@ def run_build(perplex_dir: Path, model: ModelConfig) -> None:
 
     print(f"Running BUILD for {model.project}")
     clean_project_work_files(model.work_dir, model.project)
+    build_executable = executable_path(perplex_dir, "build")
+    build_text = render_build_input(perplex_dir, model)
+    if not is_python_script(build_executable):  # the limit is the real BUILD's; test stand-ins are scripts
+        check_perplex_file_names(build_text)
     run_command(
-        executable=executable_path(perplex_dir, "build"),
-        stdin_text=render_build_input(perplex_dir, model),
+        executable=build_executable,
+        stdin_text=build_text,
         cwd=model.work_dir,
         log_path=log_path,
         label="BUILD",
     )
+    build_output = log_path.read_text(errors="replace") if log_path.exists() else ""
+    if "cannot find file" in build_output:  # BUILD then asks "try again?" and the remaining answers shift
+        raise PipelineError(
+            f"BUILD could not open a file named in the template (see 'cannot find file' in {log_path}); "
+            "the .dat it wrote is not usable."
+        )
 
     if not dat_file.exists():
         raise FileNotFoundError(f"BUILD completed but did not create expected .dat file: {dat_file}")
@@ -1012,19 +1157,54 @@ def run_vertex(perplex_dir: Path, model: ModelConfig) -> None:
     )
 
 
+FLUID_PROMPT = "Include fluid in computation of aggregate"
+
+
+def sequence_with_fluid_answer(sequence: tuple[str, ...], answer: str) -> tuple[str, ...]:
+    """Insert the answer to WERAMI's 'include fluid?' question after the system-properties choice."""
+    if sequence[:3] == ("2", "38", "1") and sequence[3:4] not in (("n",), ("y",)):
+        return sequence[:3] + (answer,) + sequence[3:]
+    if sequence[:3] == ("2", "25", "n") and len(sequence) == len(PHASE_MODES_WERAMI_INPUT_SEQUENCE):
+        return sequence[:3] + (answer,) + sequence[3:]
+    return sequence
+
+
+def werami_tab_missing_columns(tab_path: Path) -> list[str]:
+    found_header = find_header_line(tab_path.read_text(errors="replace").splitlines())
+    if found_header is None:
+        return []  # not a property table WERAMI wrote in the usual layout: left to the table validation
+    found = {canonical_column(label) for label in found_header[1]}
+    return [name for name in ("rho_kgm3", "vp_kms", "vs_kms", "cp_jm3k", "alpha_pk", "ks_bar", "gs_bar") if name not in found]
+
+
 def run_werami(perplex_dir: Path, model: ModelConfig) -> Path:
     print(f"Running WERAMI for {model.project}")
-    run_command(
-        executable=executable_path(perplex_dir, "werami"),
-        stdin_text=werami_input_text(model),
-        cwd=model.work_dir,
-        log_path=model.output_dir / "werami.log",
-        label="WERAMI",
-    )
-
     raw_tab = model.work_dir / f"{model.project}_1.tab"
-    if not raw_tab.exists():
-        raise FileNotFoundError(f"WERAMI completed but expected table was not found: {raw_tab}")
+    log_path = model.output_dir / "werami.log"
+    sequence = model.werami_input_sequence
+    for attempt in range(2):
+        raw_tab.unlink(missing_ok=True)
+        run_command(
+            executable=executable_path(perplex_dir, "werami"),
+            stdin_text=f"{model.project}\n" + "\n".join(sequence) + "\n",
+            cwd=model.work_dir,
+            log_path=log_path,
+            label="WERAMI",
+        )
+        if not raw_tab.exists():
+            raise FileNotFoundError(f"WERAMI completed but expected table was not found: {raw_tab}")
+        check_werami_grid(raw_tab)
+        missing = werami_tab_missing_columns(raw_tab)
+        if not missing:
+            break
+        # Some Perple_X versions ask whether to include fluids (e.g. stx24 from 7.3): the property
+        # answers then shift by one. Answer "n" (aggregate properties of the solid assemblage) and rerun.
+        retry = sequence_with_fluid_answer(sequence, "n")
+        if attempt == 0 and FLUID_PROMPT in log_path.read_text(errors="replace") and retry != sequence:
+            print(f"WERAMI asked whether to include fluids for {model.project}: answering 'n' and running again")
+            sequence = retry
+            continue
+        raise PipelineError(f"WERAMI table {raw_tab} lacks {', '.join(missing)}: its answers did not match. See {log_path}")
 
     raw_copy = model.output_dir / f"{model.project}_raw_werami.tab"
     shutil.copy2(raw_tab, raw_copy)
@@ -1040,6 +1220,40 @@ def run_werami(perplex_dir: Path, model: ModelConfig) -> Path:
         first_axis=model.planetprofile_first_axis,
     )
     return planetprofile_tab
+
+
+def check_werami_grid(tab_path: Path) -> None:
+    """WERAMI writes the node count of each axis in the header; one node means its answers went wrong."""
+    lines = tab_path.read_text(errors="replace").splitlines()[:12]
+    try:
+        counts = [int(lines[6].split()[0]), int(lines[10].split()[0])]
+    except (IndexError, ValueError):
+        return  # not the usual 2-D header: left to the table validation
+    if min(counts) < 2:
+        raise PipelineError(
+            f"WERAMI wrote a table with {counts[0]} x {counts[1]} nodes ({tab_path}): its answers did not match its "
+            "prompts (for example a grid-size question with sample_on_grid F, or an extra 'include fluid?' question). "
+            "Check werami.log and the werami_input_sequence."
+        )
+
+
+def run_werami_phase_modes(perplex_dir: Path, model: ModelConfig) -> Path:
+    """Second WERAMI pass: volume % of every phase on the same grid, as <project>_phase_modes.tab."""
+    print(f"Running WERAMI (phase modes) for {model.project}")
+    before = set(model.work_dir.glob(f"{model.project}_*.tab"))
+    run_command(
+        executable=executable_path(perplex_dir, "werami"),
+        stdin_text=f"{model.project}\n" + "\n".join(phase_modes_sequence_for_model(model)) + "\n",
+        cwd=model.work_dir,
+        log_path=model.output_dir / "werami_phase_modes.log",
+        label="WERAMI phase modes",
+    )
+    new_tabs = sorted(set(model.work_dir.glob(f"{model.project}_*.tab")) - before, key=lambda path: path.stat().st_mtime)
+    if not new_tabs:
+        raise FileNotFoundError(f"WERAMI phase-mode pass wrote no new table in {model.work_dir}")
+    destination = model.output_dir / f"{model.project}_phase_modes.tab"
+    shutil.copy2(new_tabs[-1], destination)
+    return destination
 
 
 def format_tab_value(value: float) -> str:
@@ -1082,6 +1296,8 @@ def run_model(perplex_dir: Path, model: ModelConfig, *, skip_validation: bool = 
     try: 
         run_vertex(perplex_dir, model)
         tab_path = run_werami(perplex_dir, model)
+        if model.phase_modes:
+            run_werami_phase_modes(perplex_dir, model)
     except Exception as e:
         # Write a failed validation report before re-raising
         validation_report_path = model.output_dir / "validation_report.txt"
@@ -1109,8 +1325,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--project", help="Run only one project from the config.")
     parser.add_argument(
         "--database",
-        choices=sorted(DATABASES),
-        help="Thermodynamic database profile to use instead of the config value.",
+        help="Thermodynamic database to use instead of the config value (built-in or declared in custom_databases).",
     )
     parser.add_argument(
         "--perplex-dir",
@@ -1120,6 +1335,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--skip-validation",
         action="store_true",
         help="Run BUILD/VERTEX/WERAMI but skip output validation.",
+    )
+    parser.add_argument(
+        "--phase-modes",
+        action="store_true",
+        help="Also write <project>_phase_modes.tab (volume %% of every phase) with a second WERAMI pass.",
     )
     return parser.parse_args(argv)
 
@@ -1141,6 +1361,8 @@ def main(argv: list[str] | None = None) -> int:
             raise PipelineError(f"Project not found in config: {args.project}")
 
         for model in selected:
+            if args.phase_modes:
+                model = replace(model, phase_modes=True)
             run_model(config.perplex_dir, model, skip_validation=args.skip_validation)
     except (
         FileNotFoundError,

@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Planetary EOS Lab: a Perple_X workbench for planetary interior equations of state"
+type: software
+authors:
+  - family-names: Vellard
+    given-names: Emma
+version: "1.0"
+date-released: "2026-07-01"
+license: MIT
+repository-code: "https://github.com/EmmaVellard/planetary-eos-lab"
+keywords:
+  - Perple_X
+  - thermodynamics
+  - equation of state
+  - planetary interiors
+  - PlanetProfile
+  - Moon

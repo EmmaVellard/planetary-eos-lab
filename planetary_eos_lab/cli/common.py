@@ -28,8 +28,7 @@ def add_common_arguments(parser: argparse.ArgumentParser) -> None:
     )
     parser.add_argument(
         "--database",
-        choices=["stx21", "hp633"],
-        help="Thermodynamic database to use (default: from config or stx21)",
+        help="Thermodynamic database to use (default: from config or stx21); built-in or declared in custom_databases",
     )
     parser.add_argument(
         "--perplex-dir",

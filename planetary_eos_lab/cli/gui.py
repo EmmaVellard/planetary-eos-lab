@@ -49,7 +49,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
+        # Run Streamlit with this interpreter, so the command works without an activated venv.
         cmd = [
+            sys.executable,
+            "-m",
             "streamlit",
             "run",
             str(gui_script),

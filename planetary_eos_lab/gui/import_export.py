@@ -143,7 +143,7 @@ def show_import_export_panel(config_path: Path, config: dict[str, Any]):
             st.success("✅ Composition imported successfully")
             st.dataframe(
                 pd.DataFrame([{"Oxide": oxide, "wt%": value} for oxide, value in composition.items()]),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
 
@@ -200,7 +200,7 @@ def show_import_export_panel(config_path: Path, config: dict[str, Any]):
                 data=csv_data,
                 file_name=f"{export_project}_composition.csv",
                 mime="text/csv",
-                use_container_width=True,
+                width="stretch",
             )
         else:
             excel_data = export_composition_to_excel(export_model)
@@ -209,7 +209,7 @@ def show_import_export_panel(config_path: Path, config: dict[str, Any]):
                 data=excel_data,
                 file_name=f"{export_project}_composition.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
+                width="stretch",
             )
 
     with col2:
@@ -218,7 +218,7 @@ def show_import_export_panel(config_path: Path, config: dict[str, Any]):
             composition = export_model.get("oxides_wt_percent", {})
             st.dataframe(
                 pd.DataFrame([{"Oxide": oxide, "wt%": composition.get(oxide, 0.0)} for oxide in OXIDE_ORDER]),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
 

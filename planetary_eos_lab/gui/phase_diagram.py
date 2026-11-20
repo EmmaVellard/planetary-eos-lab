@@ -1124,7 +1124,7 @@ def plot_phase_diagram_interactive(
             pressure_count=min(len(pressures_bar), assemblage_grid.pressure_count),
             temperature_count=min(len(temperatures_k), assemblage_grid.temperature_count),
         )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Summary info
     col1, col2, col3, col4, col5 = st.columns(5)

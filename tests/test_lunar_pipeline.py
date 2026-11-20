@@ -1045,7 +1045,7 @@ def test_export_planetprofile_copies_native_tables_with_manifest(tmp_path: Path)
     assert exported.read_text().startswith("|6.6.6\n")
     assert manifest.exists()
     manifest_data = json.loads(manifest.read_text())
-    assert manifest_data["schema_version"] == 2
+    assert manifest_data["schema_version"] == 3
     assert "does not imply scientific readiness" in manifest_data["export_warning"]
     table = manifest_data["tables"][0]
     assert table["exported_filename"] == "Custom_PlanetProfile_EOS.tab"
@@ -1434,15 +1434,10 @@ def test_pt_range_extraction_from_template() -> None:
         assert t_min == 250.0
         assert t_max == 2000.0
 
-    # Test with lunar template
+    # Lunar templates take their range from the database (or the model) through placeholders
     lunar_template = PIPELINE_DIR / "build_inputs" / "lunar_stx21_template.build.in"
-    if lunar_template.exists():
-        pt_range = run_perplex.extract_pt_range_from_template(lunar_template)
-        assert pt_range is not None
-        (p_min, p_max), (t_min, t_max) = pt_range
-        # stx21 uses 1000-50000 bar, 800-2200 K
-        assert 800 <= t_min <= 1000
-        assert 2000 <= t_max <= 2500
+    text = lunar_template.read_text()
+    assert "${P_RANGE_BAR}" in text and "${T_RANGE_K}" in text
 
 
 # ----------------------------------------------------------------------

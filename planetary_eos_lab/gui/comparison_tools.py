@@ -206,7 +206,7 @@ def show_composition_comparison(projects: list[str], config_path: Path):
 
     try:
         plot_models = selected_plot_models(config_path, projects)
-        st.plotly_chart(composition_comparison_figure(plot_models), use_container_width=True)
+        st.plotly_chart(composition_comparison_figure(plot_models), width="stretch")
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
         st.warning(f"Could not render composition comparison: {exc}")
         return
@@ -214,7 +214,7 @@ def show_composition_comparison(projects: list[str], config_path: Path):
     # Difference table (for 2 models)
     if len(plot_models) == 2:
         st.subheader("Composition Differences")
-        st.dataframe(composition_difference_rows(plot_models), use_container_width=True, hide_index=True)
+        st.dataframe(composition_difference_rows(plot_models), width="stretch", hide_index=True)
         st.caption(
             "Relative delta is the percent change from the first selected model to the second: "
             "(second - first) / first × 100. The wt% delta is the direct subtraction in normalized wt%."
@@ -232,7 +232,7 @@ def show_properties_comparison(projects: list[str], config_path: Path):
 
     try:
         plot_models = selected_plot_models(config_path, projects)
-        st.plotly_chart(property_comparison_figure(plot_models), use_container_width=True)
+        st.plotly_chart(property_comparison_figure(plot_models), width="stretch")
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
         st.info(f"Property comparison plot is unavailable for this selection: {exc}")
         return
@@ -322,7 +322,7 @@ def show_validation_comparison(models: list[dict[str, Any]], config_path: Path):
             }
         )
 
-    st.dataframe(comparison_data, use_container_width=True, hide_index=True)
+    st.dataframe(comparison_data, width="stretch", hide_index=True)
 
     # Summary counts
     st.divider()

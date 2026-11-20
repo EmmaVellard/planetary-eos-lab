@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from planetary_eos_lab.core.config import DATABASES
+from planetary_eos_lab.core.config import DATABASES, register_custom_databases
 from planetary_eos_lab.core.database_utils import get_database_components, get_source_only_oxides
 
 
@@ -274,6 +274,44 @@ def _recompute_mg_number(oxides: dict[str, float]) -> float | None:
     return round(100.0 * mg_mol / total, 2)
 
 
+def residual_mantle_composition(
+    bulk: dict[str, float],
+    crust: dict[str, float],
+    crust_mass_fraction: float,
+) -> dict[str, float]:
+    """Mantle left after extracting a crust: X_mantle = (X_bulk - f X_crust) / (1 - f).
+
+    Both compositions are normalized to 100 wt% on the oxides either of them
+    contains, so the result also sums to 100 wt%. f is the crust mass over the
+    silicate (bulk) mass. A negative oxide means the crust holds more of it than
+    the bulk can supply, and is an error.
+    """
+    f = float(crust_mass_fraction)
+    if not 0.0 < f < 1.0:
+        raise ValueError(f"crust_mass_fraction must be between 0 and 1, got {f}")
+    unknown = sorted((set(bulk) | set(crust)) - set(OXIDE_ORDER))
+    if unknown:
+        raise ValueError(f"Unknown oxide(s): {', '.join(unknown)}")
+    oxides = [o for o in OXIDE_ORDER if float(bulk.get(o, 0.0) or 0.0) or float(crust.get(o, 0.0) or 0.0)]
+    bulk_total = sum(float(bulk.get(o, 0.0) or 0.0) for o in oxides)
+    crust_total = sum(float(crust.get(o, 0.0) or 0.0) for o in oxides)
+    if bulk_total <= 0 or crust_total <= 0:
+        raise ValueError("Bulk and crust compositions must both have a positive total.")
+    mantle = {
+        o: (100.0 * float(bulk.get(o, 0.0) or 0.0) / bulk_total - f * 100.0 * float(crust.get(o, 0.0) or 0.0) / crust_total) / (1.0 - f)
+        for o in oxides
+    }
+    negative = {o: v for o, v in mantle.items() if v < 0.0}
+    if negative:
+        listed = ", ".join(f"{o} {v:.4f}" for o, v in negative.items())
+        raise ValueError(
+            f"Crust extraction leaves negative oxide amounts ({listed} wt%): the crust holds more of these oxides "
+            "than the bulk composition. Either f is too large, or the bulk composition lacks them (use the full "
+            "published composition, or set them to 0 in the crust)."
+        )
+    return mantle
+
+
 def ordered_composition(composition: dict[str, float]) -> dict[str, float]:
     unknown = sorted(set(composition) - set(OXIDE_ORDER))
     if unknown:
@@ -397,6 +435,8 @@ def write_composition(
         "literature_proxy": model.literature_proxy,
         "source_note": model.source_note,
         "source_transformation": getattr(model, "_source_transformation", None),
+        "mantle_extraction": getattr(model, "_mantle_extraction", None),
+        "excluded_oxides": getattr(model, "_excluded_oxides", None),
         "mg_number_recomputed_mol_percent": _recompute_mg_number(normalized),
         "perplex_build": build_metadata,
         "default_perplex_build": build_metadata,
@@ -668,13 +708,28 @@ def model_from_config_entry(
     project = entry.get("project")
     if not project:
         raise ValueError("Each inline composition model must define a project name.")
+    extraction = entry.get("mantle_extraction")
+    if extraction:
+        crust = extraction.get("crust_oxides_wt_percent")
+        if not isinstance(crust, dict) or "crust_mass_fraction" not in extraction:
+            raise ValueError(f"mantle_extraction of {project} needs crust_oxides_wt_percent and crust_mass_fraction")
+        bulk = composition
+        composition = residual_mantle_composition(bulk, crust, extraction["crust_mass_fraction"])
+    excluded = [str(oxide) for oxide in entry.get("excluded_oxides", []) or []]
+    unknown = sorted(set(excluded) - set(OXIDE_ORDER))
+    if unknown:
+        raise ValueError(f"excluded_oxides of {project}: unknown oxide(s) {', '.join(unknown)}")
+    composition_before_exclusion = dict(composition)
+    if excluded:
+        removed = {oxide: float(composition.get(oxide, 0.0) or 0.0) for oxide in excluded}
+        composition = {oxide: value for oxide, value in composition.items() if oxide not in excluded}
     lc = LunarComposition(
         project=project,
         description=entry.get("description", project),
         raw_wt_percent=composition,
         source_note=entry.get("source_note", MODEL_STATUS),
         scientific_status=entry.get("scientific_status", "user_defined"),
-        model_scope=entry.get("model_scope", "user_defined"),
+        model_scope="mantle_candidate" if extraction else entry.get("model_scope", "user_defined"),
         planetprofile_readiness=entry.get(
             "planetprofile_readiness",
             "not_assessed_for_planetprofile_science",
@@ -685,7 +740,7 @@ def model_from_config_entry(
         ),
         literature_proxy=bool(entry.get("literature_proxy", False)),
         database=resolve_database_name(entry.get("database", default_database)),
-        composition_class=str(entry.get("composition_class", "") or ""),
+        composition_class="residual_mantle_after_crust_extraction" if extraction else str(entry.get("composition_class", "") or ""),
         study_role=str(entry.get("study_role", "") or ""),
     )
     # source_transformation is optional catalogue metadata (structured
@@ -695,6 +750,21 @@ def model_from_config_entry(
     source_transformation = entry.get("source_transformation")
     if source_transformation is not None:
         object.__setattr__(lc, "_source_transformation", source_transformation)
+    if extraction:
+        object.__setattr__(lc, "_mantle_extraction", {
+            "method": "crust mass balance: X_mantle = (X_bulk - f X_crust) / (1 - f), both normalized to 100 wt% on their common oxides",
+            "bulk_wt_percent": {o: float(v) for o, v in bulk.items()},
+            "crust_wt_percent": {o: float(v) for o, v in crust.items()},
+            "crust_mass_fraction": float(extraction["crust_mass_fraction"]),
+            "crust_source": extraction.get("crust_source", "not given"),
+            "mantle_wt_percent_before_exclusions": composition_before_exclusion,
+        })
+    if excluded:
+        object.__setattr__(lc, "_excluded_oxides", {
+            "oxides": excluded,
+            "removed_raw_wt_percent": removed,
+            "method": "removed from the raw composition before normalization; the other oxides are renormalized to 100 wt%",
+        })
     return lc
 
 
@@ -709,6 +779,7 @@ def models_from_config(
             "and set perplex_dir to your local Perple_X install."
         )
     data = json.loads(config_path.read_text(encoding="utf-8"))
+    register_custom_databases(data, config_base_dir(config_path))
     default_database = resolve_database_name(database_override or data.get("database", DEFAULT_DATABASE))
     models: list[CompositionConfig] = []
     for entry in data.get("models", []):
@@ -810,8 +881,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--project", help="Generate only one project from the config.")
     parser.add_argument(
         "--database",
-        choices=sorted(DATABASES),
-        help="Thermodynamic database profile to use instead of the config value.",
+        help="Thermodynamic database to use instead of the config value (built-in or declared in custom_databases).",
     )
     return parser.parse_args(argv)
 

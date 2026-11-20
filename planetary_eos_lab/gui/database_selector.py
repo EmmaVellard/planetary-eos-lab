@@ -6,6 +6,7 @@ from typing import Any
 
 import streamlit as st
 
+from planetary_eos_lab.core.config import DATABASES
 from planetary_eos_lab.core.config_io import save_config_json
 from planetary_eos_lab.core.database_utils import (
     describe_database,
@@ -19,6 +20,8 @@ DEFAULT_BUILD_TEMPLATES = {
     "stx21": "build_inputs/lunar_stx21_template.build.in",
     "stx24": "build_inputs/lunar_stx24_template.build.in",
     "hp633": "build_inputs/lunar_hp633_template.build.in",
+    "hp636": "build_inputs/lunar_hp636_template.build.in",
+    "se15_fes_core": "build_inputs/core_se15_fes_template.build.in",
     "dew17_hhph": "build_inputs/icy_dew17_hhph_template.build.in",
     "hpha02_hydrous": "build_inputs/icy_hpha02_hydrous_simple_template.build.in",
     "dew13_hydrous": "build_inputs/icy_dew13_hydrous_template.build.in",
@@ -138,6 +141,9 @@ def show_database_selector(config: dict[str, Any], config_path: Path) -> str:
         key="database_selector",
         help="Choose which thermodynamic database to use for Perple_X calculations",
     )
+
+    if DATABASES[selected].caveat:
+        st.warning(DATABASES[selected].caveat)
 
     # Show database capabilities in expander
     with st.expander(f"Database details: {selected}", expanded=False):

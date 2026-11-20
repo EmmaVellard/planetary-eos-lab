@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import os
 import signal
 import subprocess
@@ -21,10 +22,16 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+import make_compositions
 import plot_comparisons
 import run_perplex
 from planetary_eos_lab.core.config import DATABASES
 from planetary_eos_lab.core.config_io import (
+    LUNAR_BSM_CATALOGUE_PATH,
+    add_missing_model_entries,
+    derived_mantle_entry,
+    remove_custom_database,
+    upsert_custom_database,
     DEFAULT_CONFIG_PATH,
     EXAMPLE_CONFIG_PATH,
     copy_example_config,
@@ -127,11 +134,12 @@ COMPOSITION_BUILD_PAGE = "Build"
 COMPOSITION_CATALOG_PAGE = "Catalog"
 COMPOSITION_BATCH_PAGE = "Batch Processing"
 COMPOSITION_THERMO_PAGE = "Thermodynamic Models"
+# Workflow order: choose or declare the database, then build, batch and review compositions.
 COMPOSITION_PAGES = [
+    COMPOSITION_THERMO_PAGE,
     COMPOSITION_BUILD_PAGE,
     COMPOSITION_BATCH_PAGE,
     COMPOSITION_CATALOG_PAGE,
-    COMPOSITION_THERMO_PAGE,
 ]
 
 
@@ -245,12 +253,19 @@ def inject_styles() -> None:
 
 def load_config_or_none(config_path: Path) -> dict[str, Any] | None:
     try:
-        return load_config_json(config_path)
+        config = load_config_json(config_path)
     except FileNotFoundError:
         return None
     except json.JSONDecodeError as exc:
         st.error(f"Config JSON is invalid: {exc}")
         return None
+    try:
+        run_perplex.register_config_databases(config, run_perplex.config_base_dir(config_path))
+    except Exception as exc:  # a bad custom database must not hide the rest of the app
+        st.error(f"custom_databases in {config_path.name}: {exc}")
+    for name, template in run_perplex.DEFAULT_BUILD_TEMPLATES.items():
+        DEFAULT_BUILD_TEMPLATES.setdefault(name, normalize_build_template_path(template))
+    return config
 
 
 def write_config(config_path: Path, config: dict[str, Any]) -> None:
@@ -526,7 +541,7 @@ def show_oxide_table(rows: list[dict[str, Any]], database: str = "stx21") -> Non
 
 @dataclass(frozen=True)
 class GuiPerplexOptions:
-    sample_on_grid: bool = False
+    sample_on_grid: bool = True
     x_nodes: tuple[int, int] = (40, 300)
     y_nodes: tuple[int, int] = (40, 300)
     grid_levels: tuple[int, int] = (1, 4)
@@ -1191,7 +1206,135 @@ def thermodynamic_model_catalog_rows() -> list[dict[str, Any]]:
     return rows
 
 
-def show_thermodynamic_model_catalog() -> None:
+def parse_component_pairs(text: str) -> list[list[str]]:
+    """One "source oxide, Perple_X component" pair per line (a single name means both are the same)."""
+    pairs = []
+    for line in text.splitlines():
+        parts = [part.strip() for part in line.replace(";", ",").split(",") if part.strip()]
+        if not parts:
+            continue
+        if len(parts) > 2:
+            raise ValueError(f"Too many fields in component line: {line!r}")
+        pairs.append([parts[0], parts[-1]])
+    return pairs
+
+
+def split_names(text: str) -> list[str]:
+    return [name.strip() for name in text.replace("\n", ",").split(",") if name.strip()]
+
+
+def template_with_file_placeholders(text: str) -> str:
+    """Point a copied template at the form's data files instead of the ones it was written for."""
+    text = re.sub(r"\$\{PERPLEX_DIR\}/datafiles/\S*solution_model\.dat", "${SOLUTION_MODEL_FILE}", text)
+    return re.sub(r"\$\{PERPLEX_DIR\}/datafiles/\S+\.dat", "${THERMODYNAMIC_DATABASE_FILE}", text)
+
+
+def show_custom_database_form(config_path: Path, config: dict[str, Any]) -> None:
+    st.caption(
+        "Declare a Perple_X database that is not built in. It is saved under `custom_databases` in the config, "
+        "with its BUILD template in `build_inputs/`, and then appears in every database menu. "
+        "See `docs/adding_a_database.md`."
+    )
+    base_dir = run_perplex.config_base_dir(config_path)
+    existing = config.get("custom_databases", []) or []
+    choice = st.selectbox(
+        "Database to edit",
+        options=["New database", *[str(e.get("name", "")) for e in existing]],
+        key="custom_db_choice",
+    )
+    current = next((e for e in existing if e.get("name") == choice), {})
+    key = f"custom_db_{choice}"
+    name = st.text_input("Name", value=current.get("name", ""), key=f"{key}_name",
+                         help="Letters, digits and underscores; not the name of a built-in database.")
+    # Perple_X thermodynamic data files are named *ver.dat (solution models and options use other names)
+    datafiles = sorted(p.name for p in (Path(str(config.get("perplex_dir", ""))) / "datafiles").glob("*ver*.dat"))
+    col1, col2 = st.columns(2)
+    with col1:
+        if datafiles:
+            default_file = current.get("database_file", "stx21ver.dat" if "stx21ver.dat" in datafiles else datafiles[0])
+            database_file = st.selectbox("Thermodynamic data file", options=datafiles,
+                                         index=datafiles.index(default_file) if default_file in datafiles else 0,
+                                         key=f"{key}_dbfile")
+        else:
+            database_file = st.text_input("Thermodynamic data file", value=current.get("database_file", ""), key=f"{key}_dbfile")
+    with col2:
+        solution_file = st.text_input("Solution model file", value=current.get("solution_model_file", "solution_model.dat"),
+                                      key=f"{key}_solfile")
+    components_text = st.text_area(
+        "Components, in BUILD order: one `source oxide, Perple_X component` per line",
+        value="\n".join(f"{a}, {b}" for a, b in current.get("components", [])),
+        key=f"{key}_components", height=150,
+        help="An oxide may feed two components (FeO, Fe and FeO, O), as in stx24.",
+    )
+    col3, col4 = st.columns(2)
+    with col3:
+        solution_models = st.text_input("Solution models (comma-separated)", value=", ".join(current.get("solution_models", [])),
+                                        key=f"{key}_models")
+    with col4:
+        excluded = st.text_input("Excluded phases (comma-separated)", value=", ".join(current.get("excluded_phases", [])),
+                                 key=f"{key}_excluded")
+    pt = current.get("pt_range") or {"pressure_bar": {"min": 1000.0, "max": 50000.0}, "temperature_k": {"min": 800.0, "max": 2200.0}}
+    c1, c2, c3, c4 = st.columns(4)
+    p_min = c1.number_input("P min (bar)", value=float(pt["pressure_bar"]["min"]), key=f"{key}_pmin")
+    p_max = c2.number_input("P max (bar)", value=float(pt["pressure_bar"]["max"]), key=f"{key}_pmax")
+    t_min = c3.number_input("T min (K)", value=float(pt["temperature_k"]["min"]), key=f"{key}_tmin")
+    t_max = c4.number_input("T max (K)", value=float(pt["temperature_k"]["max"]), key=f"{key}_tmax")
+    werami = st.text_input(
+        "WERAMI answers after the project name (comma-separated, optional)",
+        value=", ".join(current.get("werami_input_sequence", [])), key=f"{key}_werami",
+        help="Empty: the stx21 answers. Databases with a fluid or liquid add a 'include fluid?' answer (see hp633).",
+    )
+    templates = available_build_templates()
+    current_template = str(current.get("build_template", ""))
+    start = st.selectbox(
+        "Start the BUILD template from", options=templates,
+        index=templates.index(current_template) if current_template in templates else 0, key=f"{key}_template_start",
+    )
+    template_text = st.text_area(
+        "BUILD template (answers to BUILD's prompts; placeholders ${PROJECT}, ${PERPLEX_DIR}, ${PERPLEX_BULK_VALUES}, "
+        "${P_RANGE_BAR}, ${T_RANGE_K}, ${BUILD_TITLE})",
+        value=template_with_file_placeholders((REPO_ROOT / start).read_text(encoding="utf-8")) if (REPO_ROOT / start).exists() else "",
+        key=f"{key}_template_text_{start}", height=320,
+    )
+    description = st.text_input("Description", value=current.get("description", ""), key=f"{key}_description")
+
+    save_col, delete_col = st.columns([1, 1])
+    if save_col.button("Save database to config", type="primary", key=f"{key}_save"):
+        try:
+            if not name.strip() or not name.strip().replace("_", "").isalnum():
+                raise ValueError("The name must use letters, digits and underscores only.")
+            template_rel = f"build_inputs/custom_{name.strip()}.build.in"
+            spec = {
+                "name": name.strip(),
+                "database_file": database_file.strip(),
+                "solution_model_file": solution_file.strip(),
+                "components": parse_component_pairs(components_text),
+                "build_template": template_rel,
+                "solution_models": split_names(solution_models),
+                "excluded_phases": split_names(excluded),
+                "pt_range": {"pressure_bar": {"min": p_min, "max": p_max}, "temperature_k": {"min": t_min, "max": t_max}},
+                "description": description.strip() or f"Custom database {name.strip()}",
+            }
+            if split_names(werami):
+                spec["werami_input_sequence"] = split_names(werami)
+            if not (0 < p_min < p_max and 0 < t_min < t_max):
+                raise ValueError("The P-T range needs 0 < min < max.")
+            if "${PERPLEX_BULK_VALUES}" not in template_text:
+                raise ValueError("The BUILD template must contain ${PERPLEX_BULK_VALUES}.")
+            template_path = base_dir / template_rel
+            template_path.parent.mkdir(parents=True, exist_ok=True)
+            template_path.write_text(template_text.rstrip("\n") + "\n", encoding="utf-8")
+            run_perplex.register_config_databases({"custom_databases": [spec]}, base_dir)  # validates the entry
+            DEFAULT_BUILD_TEMPLATES[spec["name"]] = template_rel
+            write_config(config_path, upsert_custom_database(config, spec))
+        except Exception as exc:  # show any validation problem in the form
+            st.error(f"Not saved: {exc}")
+    if current and delete_col.button(f"Remove {choice} from config", key=f"{key}_delete"):
+        write_config(config_path, remove_custom_database(config, choice))
+        st.info("Removed from the config; its BUILD template file is kept. Reload the page to update the menus.")
+
+
+def show_thermodynamic_model_catalog(config_path: Path | None = None, config: dict[str, Any] | None = None) -> None:
     st.subheader("Thermodynamic Model Catalog")
     st.caption(
         "Use this as a quick guide for choosing the database/template setup before building or running a composition."
@@ -1209,6 +1352,10 @@ def show_thermodynamic_model_catalog() -> None:
         format_func=lambda database: f"{database}: {DATABASES[database].description}",
     )
     st.code(describe_database(selected_database), language="text")
+
+    if config_path is not None and config is not None:
+        with st.expander("Add or edit a database", expanded=False):
+            show_custom_database_form(config_path, config)
 
 
 def single_composition_figure(values: dict[str, float], *, x_title: str) -> go.Figure:
@@ -1922,6 +2069,46 @@ def show_streamlit_command_job() -> None:
         st.rerun()
 
 
+def job_created_files(job: dict[str, Any], repo_root: Path = REPO_ROOT, limit: int = 300) -> list[dict[str, Any]]:
+    """Files written by a run: in the folders its commands name, modified between its start and last update."""
+    try:
+        start = time.mktime(time.strptime(str(job.get("start_time", "")), "%Y%m%d-%H%M%S"))
+    except ValueError:
+        return []
+    try:
+        end = time.mktime(time.strptime(str(job.get("last_update", "")), "%Y%m%d-%H%M%S")) + 60
+    except ValueError:
+        end = time.time()
+    if job.get("status") == "running":
+        end = time.time()
+    folders: set[Path] = set()
+    for command in job.get("commands", []):
+        args = [str(a) for a in command.get("command", [])]
+        for flag, value in zip(args, args[1:]):
+            if flag == "--project":
+                folders.add(repo_root / "outputs" / value)
+            elif flag in ("--planetprofile-export-dir", "--output-dir", "--outdir"):
+                folders.add(Path(value))
+        if any(Path(a).name in ("make_compositions.py", "run_full_pipeline.py") for a in args):
+            folders.add(repo_root / "compositions")
+    rows = []
+    log_path = Path(str(job.get("log_path", "")))
+    candidates = [log_path] if log_path.is_file() else []
+    for folder in sorted(folders):
+        if folder.is_dir():
+            candidates.extend(path for path in folder.rglob("*") if path.is_file())
+    for path in candidates:
+        modified = path.stat().st_mtime
+        if start - 1 <= modified <= end:
+            try:
+                shown = path.relative_to(repo_root).as_posix()
+            except ValueError:
+                shown = str(path)
+            rows.append({"file": shown, "size (kB)": round(path.stat().st_size / 1024, 1),
+                         "modified": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(modified))})
+    return sorted(rows, key=lambda row: row["file"])[:limit]
+
+
 def show_persistent_jobs() -> None:
     """Show local run history from disk."""
     jobs = reconciled_persistent_jobs()
@@ -1957,6 +2144,12 @@ def show_persistent_jobs() -> None:
             log_path = Path(str(job.get("log_path", "")))
             if log_path.exists():
                 st.caption(f"**Log:** `{log_path}`")
+            created = job_created_files(job)
+            if created:
+                st.caption(f"**Files written by this run ({len(created)}):**")
+                st.dataframe(created, hide_index=True, width="stretch")
+            elif status != "running":
+                st.caption("**Files written by this run:** none found (they may have been moved or overwritten since).")
 
             if status == "running":
                 if st.button("Kill Run", key=f"kill_job_{job_id}", type="primary"):
@@ -2042,6 +2235,81 @@ def editable_model_form(config_path: Path, config: dict[str, Any], model: dict[s
         write_config(config_path, updated_config)
 
 
+# Taylor (1999), "The Moon", Encyclopedia of the Solar System, Table III, Highlands (Cr, Mn converted from ppm).
+DEFAULT_CRUST_OXIDES = {
+    "SiO2": 45.0, "TiO2": 0.56, "Al2O3": 24.6, "FeO": 6.6, "MgO": 6.8, "CaO": 15.8,
+    "Na2O": 0.45, "K2O": 0.03, "Cr2O3": 0.1169, "MnO": 0.0736,
+}
+DEFAULT_CRUST_SOURCE = "Taylor (1999), The Moon, Encyclopedia of the Solar System, Table III, Highlands"
+
+
+def show_bsm_catalogue_panel(config_path: Path, config: dict[str, Any]) -> None:
+    st.caption(
+        "Add the published lunar bulk silicate Moon compositions (Hauri et al. 2015, Warren 2005 Preferred "
+        "and Alt. 5) from `configs/lunar_bsm_models.json`. Models already in your config are not changed."
+    )
+    if st.button("Add the published lunar BSMs"):
+        entries = json.loads(LUNAR_BSM_CATALOGUE_PATH.read_text(encoding="utf-8"))["models"]
+        updated, added = add_missing_model_entries(config, entries)
+        if added:
+            write_config(config_path, updated)
+            st.success("Added: " + ", ".join(added))
+        else:
+            st.info("All published BSMs are already in your config.")
+
+
+def show_mantle_extraction_builder(config_path: Path, config: dict[str, Any], models: list[dict[str, Any]]) -> None:
+    st.caption(
+        "Mantle left after extracting a crust from a saved composition: "
+        "X_mantle = (X_bulk − f·X_crust) / (1 − f), both normalized to 100 wt%. "
+        "f is the crust mass over the silicate mass. Do the extraction on the full composition; "
+        "drop oxides (e.g. TiO2) afterwards with `excluded_oxides`."
+    )
+    oxide_models = [m for m in models if any(isinstance(m.get(k), dict) for k in ("oxides_wt_percent", "raw_wt_percent", "composition_raw"))]
+    if not oxide_models:
+        st.info("No saved oxide composition to start from. Add the published lunar BSMs from the Catalog page first.")
+        return
+    source_project = st.selectbox(
+        "Bulk composition", options=[str(m.get("project", "")) for m in oxide_models], key="mantle_source"
+    )
+    source = next(m for m in oxide_models if m.get("project") == source_project)
+    project = st.text_input("New project name", value=f"{source_project}_mantle", key=f"mantle_project_{source_project}")
+    fraction = st.number_input(
+        "Crust mass fraction f", min_value=0.0, max_value=0.99, value=0.05, step=0.001, format="%.5f", key="mantle_f"
+    )
+    crust_source = st.text_input("Crust composition source", value=DEFAULT_CRUST_SOURCE, key="mantle_crust_source")
+    st.markdown("**Crust composition, wt%** (defaults: Taylor 1999 Highlands; edit as needed)")
+    crust_cols = st.columns(4)
+    crust = {
+        oxide: crust_cols[index % 4].number_input(
+            oxide, min_value=0.0, value=float(DEFAULT_CRUST_OXIDES.get(oxide, 0.0)), step=0.01, format="%.4f",
+            key=f"mantle_crust_{oxide}",
+        )
+        for index, oxide in enumerate(OXIDE_ORDER)
+    }
+    try:
+        entry = derived_mantle_entry(source, project.strip(), crust, fraction, crust_source.strip())
+        bulk = entry["oxides_wt_percent"]
+        mantle = make_compositions.residual_mantle_composition(bulk, entry["mantle_extraction"]["crust_oxides_wt_percent"], fraction)
+    except ValueError as exc:
+        st.error(str(exc))
+        return
+    total = sum(float(v or 0.0) for v in bulk.values()) or 1.0
+    st.dataframe(
+        [
+            {"oxide": oxide, "bulk wt% (normalized)": 100.0 * float(bulk.get(oxide, 0.0) or 0.0) / total,
+             "crust wt%": crust.get(oxide, 0.0), "mantle wt%": mantle.get(oxide, 0.0)}
+            for oxide in OXIDE_ORDER if bulk.get(oxide) or crust.get(oxide)
+        ],
+        hide_index=True,
+    )
+    existing = {str(m.get("project", "")) for m in models}
+    if st.button("Save derived mantle to config", type="primary", disabled=not project.strip() or project.strip() in existing):
+        write_config(config_path, replace_model_entry(config, project.strip(), entry))
+    if project.strip() in existing:
+        st.caption(f"`{project.strip()}` already exists: choose another name.")
+
+
 def composition_workspace(config_path: Path, config: dict[str, Any], models: list[dict[str, Any]]) -> dict[str, Any]:
     database = get_current_database(config)
     st.subheader("Build Composition")
@@ -2052,14 +2320,23 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
 
     st.markdown("**Thermodynamic database for composition fields**")
     database = show_database_selector(config, config_path)
+    st.caption("To add a database that is not listed: *Composition > Thermodynamic Models > Add or edit a database*.")
 
     action_col, source_col = st.columns([1.35, 1])
     with action_col:
         builder_action = st.radio(
             "Builder action",
-            options=["Create a new composition", "Copy a saved composition", "Edit a saved composition"],
+            options=[
+                "Create a new composition",
+                "Copy a saved composition",
+                "Edit a saved composition",
+                "Derive a mantle by crust extraction",
+            ],
             horizontal=True,
         )
+    if builder_action == "Derive a mantle by crust extraction":
+        show_mantle_extraction_builder(config_path, config, models)
+        return {}
     existing_projects = {str(model.get("project", "")) for model in models if model.get("project")}
     creating_new = builder_action == "Create a new composition"
     copying_existing = builder_action == "Copy a saved composition"
@@ -2349,7 +2626,7 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
                         {row["component"]: round(row["normalized to 100 wt%"], 2) for row in rows},
                         x_title="Component",
                     ),
-                    use_container_width=True,
+                    width="stretch",
                 )
         else:
             rows = oxide_table_rows(edited, database=database) if validation.ok else []
@@ -2367,7 +2644,7 @@ def composition_workspace(config_path: Path, config: dict[str, Any], models: lis
                         {row["oxide"]: round(row["normalized_wt_percent"], 2) for row in plot_rows},
                         x_title="Oxide",
                     ),
-                    use_container_width=True,
+                    width="stretch",
                 )
     with guardrail_col:
         if validation.ok:
@@ -2403,6 +2680,8 @@ def show_composition_page(
         )
 
         st.markdown("**Catalog actions**")
+        with st.expander("Published lunar BSM compositions", expanded=not models):
+            show_bsm_catalogue_panel(config_path, config)
         action_col1, action_col2 = st.columns([1, 1])
         with action_col1:
             with st.expander("Import or export compositions", expanded=True):
@@ -2420,7 +2699,7 @@ def show_composition_page(
         return
 
     if page == COMPOSITION_THERMO_PAGE:
-        show_thermodynamic_model_catalog()
+        show_thermodynamic_model_catalog(config_path, config)
         return
 
     st.warning(f"Unknown composition page `{page}`. Showing Build instead.")
@@ -2519,9 +2798,9 @@ def show_selected_comparison_plots(config_path: Path, models: list[dict[str, Any
     try:
         config = run_perplex.load_config(config_path)
         plot_models = plot_comparisons.selected_plot_models(config, projects_to_plot)
-        st.plotly_chart(composition_comparison_figure(plot_models), use_container_width=True)
+        st.plotly_chart(composition_comparison_figure(plot_models), width="stretch")
         try:
-            st.plotly_chart(property_comparison_figure(plot_models), use_container_width=True)
+            st.plotly_chart(property_comparison_figure(plot_models), width="stretch")
         except (FileNotFoundError, ValueError) as exc:
             st.info(f"Property comparison plot is unavailable for this selection: {exc}")
     except (FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
@@ -2738,7 +3017,7 @@ def main() -> None:
     if st.session_state.get("workspace_mode") == LEGACY_COMPOSITION_BUILDER_MODE:
         st.session_state["workspace_mode"] = COMPOSITION_BUILDER_MODE
     if "composition_page_index" not in st.session_state:
-        set_composition_page(0)
+        set_composition_page(COMPOSITION_PAGES.index(COMPOSITION_BUILD_PAGE))  # land on Build, not on the reference page
     else:
         set_composition_page(int(st.session_state.get("composition_page_index", 0)))
     if st.session_state.get("workspace_mode") == BATCH_PROCESSING_MODE:
@@ -3024,7 +3303,7 @@ def main() -> None:
                 file_name=model_definitions_export_filename(projects_to_export) if projects_to_export else "model_definitions.json",
                 mime="application/json",
                 disabled=not projects_to_export,
-                use_container_width=True,
+                width="stretch",
             )
 
             st.divider()

@@ -22,6 +22,9 @@ def get_database_components(database_name: str) -> tuple[tuple[str, str], ...]:
     if database_name not in DATABASES:
         raise ValueError(f"Unknown database: {database_name}")
 
+    if DATABASES[database_name].components:
+        return DATABASES[database_name].components
+
     if database_name == "stx21":
         return (
             ("Na2O", "NA2O"),
@@ -46,7 +49,7 @@ def get_database_components(database_name: str) -> tuple[tuple[str, str], ...]:
             ("Cr2O3", "Cr2O3"),
         )
 
-    elif database_name == "hp633":
+    elif database_name in ("hp633", "hp636"):
         # Match the component names declared by hp633ver.dat
         # Includes all common rock-forming oxides
         # Does not include P2O5 (not declared by hp633ver.dat)
@@ -63,6 +66,13 @@ def get_database_components(database_name: str) -> tuple[tuple[str, str], ...]:
             ("Na2O", "Na2O"),
             ("K2O", "K2O"),
             ("H2O", "H2O"),
+        )
+
+    elif database_name == "se15_fes_core":
+        # Metallic core: Fe-S binary, entered as components_wt_percent {"Fe": ..., "S": ...}
+        return (
+            ("S", "S"),
+            ("Fe", "Fe"),
         )
 
     elif database_name == "dew17_hhph":
@@ -195,6 +205,7 @@ def describe_database(database_name: str) -> str:
         f"Database: {db.name}",
         f"File: {db.database_file}",
         f"Description: {db.description}",
+        *([f"WARNING: {db.caveat}"] if db.caveat else []),
         "",
         f"Modeled components/oxides: {', '.join(sorted(active))}",
     ]

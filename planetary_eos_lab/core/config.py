@@ -28,6 +28,13 @@ class ThermodynamicDatabase:
     solution_models: tuple[str, ...] = field(default_factory=tuple)
     pt_range: dict[str, dict[str, float]] = field(default_factory=dict)
     description: str = ""
+    # Set for databases declared in a config file ("custom_databases"); built-in
+    # databases keep these in database_utils / run_perplex.
+    components: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    build_template: str = ""
+    werami_input_sequence: tuple[str, ...] = field(default_factory=tuple)
+    # Shown in the GUI and printed at every run: limits of validity the user must know.
+    caveat: str = ""
 
     def __post_init__(self):
         if not self.pt_range:
@@ -49,7 +56,8 @@ DATABASES = {
         name="stx24",
         database_file="stx24ver.dat",
         solution_model_file="stx24_solution_model.dat",
-        excluded_phases=(),
+        # stx24ver.dat (Perple_X 7.2.13+): exclude O2 except for calculations as a function of f(O2) or a(O2)
+        excluded_phases=("O2",),
         solution_models=DEFAULT_SOLUTION_MODELS,
         pt_range={"pressure_bar": {"min": 1000.0, "max": 50000.0}, "temperature_k": {"min": 300.0, "max": 2200.0}},
         description=(
@@ -67,6 +75,36 @@ DATABASES = {
         description=(
             "Holland & Powell 2011 (v6.33) - includes TiO2 and K2O components; "
             "P2O5 remains source-only unless a custom P-bearing database is supplied"
+        ),
+    ),
+    "hp636": ThermodynamicDatabase(
+        name="hp636",
+        database_file="hp636ver.dat",
+        solution_model_file="solution_model.dat",
+        excluded_phases=("q", "crst", "trd"),
+        solution_models=("O(HP)", "Opx(HP)", "Cpx(HP)", "Gt(HP)", "Sp(HP)", "Pl(I1,HP)", "Ilm(WPH)"),
+        pt_range=DEFAULT_PT_RANGE.copy(),
+        description=(
+            "Holland & Powell data set v6.36 - same components and solution models as hp633; "
+            "use it for Ti-bearing compositions (with excluded_oxides for a Ti-free control)"
+        ),
+    ),
+    "se15_fes_core": ThermodynamicDatabase(
+        name="se15_fes_core",
+        database_file="se15ver.dat",
+        solution_model_file="solution_model.dat",
+        excluded_phases=(),
+        solution_models=("Po(SE)", "FeS_liq"),
+        pt_range={
+            "pressure_bar": {"min": 40000.0, "max": 90000.0},
+            "temperature_k": {"min": 500.0, "max": 2000.0},
+        },
+        description=(
+            "Saxena & Eriksson (2015) Fe-S data set for metallic cores (components Fe and S, wt%), "
+            "pyrrhotite and Fe-S liquid; the setup of PlanetProfile's Fe-S core tables"
+        ),
+        caveat=(
+            "Fe-S core tables are checked only between 4 and 9 GPa (against PlanetProfile's Fe-S core tables): results outside this range are not guaranteed. The data set was published for ultra-high pressures (Saxena & Eriksson 2015), and the shear moduli of solid Fe are estimated from a Poisson ratio, not data."
         ),
     ),
     "dew17_hhph": ThermodynamicDatabase(
@@ -129,6 +167,54 @@ DATABASES = {
         description="DEW17/Holland-Powell element setup for volatile-rich cometary compositions",
     ),
 }
+
+BUILTIN_DATABASES = frozenset(DATABASES)
+
+
+def register_custom_databases(config_data: dict[str, Any], base_dir: Path) -> list[ThermodynamicDatabase]:
+    """Add the databases declared under "custom_databases" in a models config to DATABASES.
+
+    Each entry needs name, database_file, solution_model_file, components (list of
+    [source_oxide, perplex_component] pairs) and build_template (path relative to
+    the repository or absolute). Optional: excluded_phases, solution_models, pt_range,
+    werami_input_sequence, description. Calling it again with the same entries is safe.
+    """
+    registered = []
+    for spec in config_data.get("custom_databases", []) or []:
+        if not isinstance(spec, dict):
+            raise ConfigurationError("Each custom_databases entry must be a JSON object.")
+        missing = [key for key in ("name", "database_file", "solution_model_file", "components", "build_template") if not spec.get(key)]
+        name = str(spec.get("name", "?"))
+        if missing:
+            raise ConfigurationError(f"custom database '{name}' is missing: {', '.join(missing)}")
+        if name in BUILTIN_DATABASES:
+            raise ConfigurationError(f"custom database '{name}' has the name of a built-in database; choose another name.")
+        try:
+            components = tuple((str(source), str(component)) for source, component in spec["components"])
+        except (TypeError, ValueError) as exc:
+            raise ConfigurationError(
+                f"custom database '{name}': components must be a list of [source_oxide, perplex_component] pairs."
+            ) from exc
+        template = Path(str(spec["build_template"])).expanduser()
+        if not template.is_absolute():
+            template = base_dir / template
+        if not template.exists():
+            raise ConfigurationError(f"custom database '{name}': BUILD template not found: {template}")
+        db = ThermodynamicDatabase(
+            name=name,
+            database_file=str(spec["database_file"]),
+            solution_model_file=str(spec["solution_model_file"]),
+            excluded_phases=tuple(spec.get("excluded_phases", ())),
+            solution_models=tuple(spec.get("solution_models", ())),
+            pt_range=spec.get("pt_range") or DEFAULT_PT_RANGE.copy(),
+            description=str(spec.get("description", "Custom database declared in the config")),
+            components=components,
+            build_template=str(template),
+            werami_input_sequence=tuple(str(item) for item in spec.get("werami_input_sequence", ())),
+        )
+        DATABASES[name] = db
+        registered.append(db)
+    return registered
 
 
 @dataclass
