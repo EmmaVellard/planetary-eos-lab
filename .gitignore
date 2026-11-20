@@ -42,6 +42,7 @@ docs/*
 !docs/adding_a_database.md
 !docs/python_api.md
 !docs/planetprofile_usage.md
+!docs/databases.md
 .jobs/
 /fits/
 /fits_plots/

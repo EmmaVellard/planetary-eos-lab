@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `docs/python_api.md`, `docs/planetprofile_usage.md`, `examples/warren_mantle_stx24.py`, `CITATION.cff`.
 
 ### Changed
+- README rewritten for a new user (what the lab does, quick start, interface, scripts, databases,
+  configuration, outputs, checks, limits, citation); INSTALL.md rewritten step by step (Perple_X on macOS,
+  100-character paths, self-test, first run); database details in docs/databases.md; QUICKSTART.md removed
+  (outdated, replaced by the README quick start); copyright year 2026.
 - `validate_tab.py` accepts up to 0.15 % non-finite values in large tables (was 0.1 %).
 - Component status shows an oxide split into several components (FeO -> Fe + O).
 - Export manifest schema 3: EoS Lab commit and dirty flag, Perple_X version, sha256 of tables and BUILD

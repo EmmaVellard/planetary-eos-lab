@@ -1,258 +1,127 @@
-# Installation Guide
+# Installing Planetary EOS Lab, step by step
 
-Detailed installation instructions for Planetary EOS Lab.
+About 15 minutes. You need a terminal; the commands are for macOS and Linux, with the Windows
+equivalents where they differ.
 
-## System Requirements
+## 1. Python 3.10 or later
 
-- **Operating System**: Linux, macOS, or Windows
-- **Python**: 3.9 or later
-- **Perple_X**: Latest version from [jadconnolly/Perple_X](https://github.com/jadconnolly/Perple_X)
-- **Disk Space**: ~100 MB for code, additional space for outputs
+Check what you have:
 
-## Step 1: Install Python
-
-### macOS
 ```bash
-brew install python@3.11
+python3 --version
 ```
 
-### Linux (Ubuntu/Debian)
-```bash
-sudo apt update
-sudo apt install python3.11 python3.11-venv python3-pip
-```
+If it is older than 3.10 or missing, install a recent Python: on macOS `brew install python@3.12`
+(with [Homebrew](https://brew.sh)) or the installer from [python.org](https://www.python.org/downloads/);
+on Ubuntu/Debian `sudo apt install python3 python3-venv`; on Windows the installer from python.org
+(tick "Add Python to PATH").
 
-### Windows
-Download from [python.org](https://www.python.org/downloads/)
+## 2. Perple_X
 
-## Step 2: Install Perple_X
+Planetary EOS Lab drives Perple_X but does not include it.
 
-1. **Download Perple_X**
-   - Visit https://github.com/jadconnolly/Perple_X
-   - Download the appropriate version for your OS
-   - Or use the official Perple_X website: https://www.perplex.ethz.ch
+1. Download the release for your system from
+   [github.com/jadconnolly/Perple_X/releases](https://github.com/jadconnolly/Perple_X/releases)
+   (version 7.2.13 or later; the lab is tested with 7.2.5 and 7.3.3).
+2. Unpack it in a folder with a **short path**, for example `~/perplex` or `C:\perplex`. Perple_X reads
+   file names of at most 100 characters, and the path of its data files must fit.
+3. Check that the folder contains `bin/` (with `build`, `vertex`, `werami`) and `datafiles/`:
 
-2. **Extract to a permanent location**
    ```bash
-   # Example locations
-   # macOS/Linux: /opt/perplex or ~/perplex
-   # Windows: C:\perplex
-   
-   mkdir -p ~/perplex
-   cd ~/perplex
-   # Extract archive here
+   ls ~/perplex/bin ~/perplex/datafiles | head
    ```
 
-3. **Verify installation**
+4. Check that the programs start:
+
    ```bash
-   # Should contain:
-   ls ~/perplex
-   # bin/          (or executables: BUILD, VERTEX, WERAMI)
-   # datafiles/    (thermodynamic databases)
+   cd /tmp && ~/perplex/bin/build < /dev/null | grep release
    ```
 
-## Step 3: Install Planetary EOS Lab
+   It should print a line such as `Perple_X release 7.3.3 Nov 10, 2026.`
 
-### Option A: From PyPI (Recommended when published)
+**If nothing is printed on macOS** (the program is stopped at once), macOS is refusing the downloaded
+binaries. The release programs look for their libraries in `../lib` only after you add that path, and
+they then need to be signed again on your computer. Run this once, in the Perple_X folder:
 
 ```bash
-pip install planetary-eos-lab
+cd ~/perplex
+for f in bin/*; do install_name_tool -add_rpath @executable_path/../lib "$f" 2>/dev/null; codesign --force --sign - "$f"; done
+for f in lib/*.dylib; do codesign --force --sign - "$f"; done
 ```
 
-### Option B: From GitHub (Latest)
+These commands only change your local copy; deleting the folder undoes them. On Linux, if a program
+is not executable: `chmod +x ~/perplex/bin/*`. On Windows, if Windows blocks the programs: right-click
+each one, Properties, Unblock.
+
+## 3. Planetary EOS Lab
 
 ```bash
-# Clone repository
 git clone https://github.com/EmmaVellard/planetary-eos-lab.git
 cd planetary-eos-lab
-
-# Install
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -e .
 ```
 
-### Option C: Development Install
+The virtual environment (`.venv`) keeps the lab's packages apart from the rest of your system; activate
+it (`source .venv/bin/activate`) each time you open a new terminal. To also run the tests, install
+`pip install -e ".[dev]"`.
+
+## 4. Check the installation
 
 ```bash
-# Clone repository
-git clone https://github.com/EmmaVellard/planetary-eos-lab.git
-cd planetary-eos-lab
-
-# Install with development dependencies
-pip install -e ".[dev]"
-
-# Verify tests pass
-pytest
+planetary-eos-selftest --perplex-dir ~/perplex
 ```
 
-### Using a Virtual Environment (Recommended)
+Each line says PASS, WARN or FAIL: Python and its packages, the Perple_X programs and version, the data
+files of every database, then a small real model (about 5 seconds) compared with reference values. The
+last line says `SELFTEST PASSED` when everything works. A WARN about a database you do not use can be
+ignored; a WARN about `stx24ver.dat` means your Perple_X predates the stx24 correction (update it before
+using stx24).
+
+## 5. First run
 
 ```bash
-# Create virtual environment
-python3 -m venv perplex-env
-
-# Activate (macOS/Linux)
-source perplex-env/bin/activate
-
-# Activate (Windows)
-perplex-env\Scripts\activate
-
-# Install
-pip install planetary-eos-lab
-# or: pip install -e .
+python examples/first_run.py --perplex-dir ~/perplex
 ```
 
-## Step 4: Initial Configuration
+This runs the check again, creates your configuration file `configs/models.json` from
+`configs/models.example.json` with your Perple_X folder (an existing file is never replaced), runs the
+first example model in about 10 seconds and prints where its table is.
 
-1. **Copy example config**
-   ```bash
-   cd planetary-eos-lab
-   cp configs/models.example.json configs/models.json
-   ```
-
-2. **Edit config with your Perple_X path**
-   ```bash
-   # macOS/Linux
-   nano configs/models.json
-   
-   # Or use GUI (Step 5) to set the path
-   ```
-
-   ```json
-   {
-     "perplex_dir": "/Users/yourname/perplex",
-     "models": [ ... ]
-   }
-   ```
-
-## Step 5: Launch GUI
+## 6. Open the interface
 
 ```bash
 planetary-eos-gui
 ```
 
-The GUI will open in your browser at http://localhost:8501
+Then open http://localhost:8501 in your browser (the terminal prints the address). The Perple_X
+folder shown in the sidebar must be the one you installed; change it there and click *Save Perple_X
+path* if needed. Stop the interface with Ctrl-C in the terminal.
 
-**First-time setup in GUI:**
-1. Go to "1. Setup & Select Model"
-2. Enter your Perple_X directory path
-3. Click "Save Perple_X path to config"
+## Updating
 
-## Verification
-
-Test your installation:
-
-```bash
-# 1. Check Python version
-python --version  # Should be 3.9+
-
-# 2. Check planetary-eos-lab is installed
-pip show planetary-eos-lab
-
-# 3. Test CLI commands
-planetary-eos-gui --help
-planetary-eos-run --version
-
-# 4. Run tests (if dev install)
-pytest
-
-# 5. Test Perple_X executables
-ls ~/perplex/bin/  # Should show BUILD, VERTEX, WERAMI
-```
-
-## Common Issues
-
-### Issue: `planetary-eos-gui: command not found`
-
-**Solution:**
-```bash
-# Ensure pip install location is in PATH
-python -m site --user-base
-# Add <user-base>/bin to your PATH
-
-# Or run directly:
-python -m planetary_eos_lab.cli.gui
-```
-
-### Issue: `ModuleNotFoundError: No module named 'streamlit'`
-
-**Solution:**
-```bash
-pip install streamlit
-# or reinstall:
-pip install -e .
-```
-
-### Issue: Perple_X executables not found
-
-**Solution:**
-```bash
-# Verify Perple_X path
-ls ~/perplex
-ls ~/perplex/bin/BUILD    # Should exist
-
-# Update config
-nano configs/models.json
-# Set "perplex_dir": "/correct/path/to/perplex"
-```
-
-### Issue: Permission denied when running Perple_X
-
-**Solution (macOS/Linux):**
-```bash
-chmod +x ~/perplex/bin/*
-```
-
-**Solution (Windows):**
-Right-click executables → Properties → Unblock
-
-### Issue: GUI doesn't open in browser
-
-**Solution:**
-```bash
-# Check if streamlit is running
-ps aux | grep streamlit
-
-# Manually open: http://localhost:8501
-
-# Try different port
-streamlit run planetary_eos_lab/gui/streamlit_app.py --server.port 8502
-```
-
-## Upgrading
-
-### From Git
 ```bash
 cd planetary-eos-lab
 git pull
-pip install -e . --upgrade
+pip install -e .
 ```
 
-### From PyPI
-```bash
-pip install --upgrade planetary-eos-lab
-```
+Your `configs/models.json` and `outputs/` are not touched by an update.
+
+## Common problems
+
+| Problem | What to do |
+| --- | --- |
+| `planetary-eos-gui: command not found` | Activate the virtual environment (`source .venv/bin/activate`), or run `python -m planetary_eos_lab.cli.gui`. |
+| `No module named ...` | `pip install -e .` again, inside the activated environment. |
+| A Perple_X program stops at once on macOS | See the macOS paragraph of step 2. |
+| `Perple_X reads file names of at most 100 characters` | Move the Perple_X folder to a shorter path (or point to a short symbolic link) and update the path in the sidebar or in `configs/models.json`. |
+| `BUILD/WERAMI did not finish within ... s` | Perple_X waited for an answer the template did not give; the message shows its last question. Usually a template that does not match your Perple_X version or database: see [docs/adding_a_database.md](docs/adding_a_database.md). |
+| `Missing Perple_X thermodynamic data file` | The database's data file is not in `datafiles/` of your Perple_X; update Perple_X or choose another database. |
+| The port 8501 is taken | `planetary-eos-gui --port 8502`. |
 
 ## Uninstalling
 
-```bash
-pip uninstall planetary-eos-lab
-
-# Remove config (optional)
-rm -rf configs/models.json
-
-# Remove outputs (optional)
-rm -rf outputs/ compositions/
-```
-
-## Next Steps
-
-- Read [README.md](README.md) for workflow overview
-- Check [composition.md](composition.md) for lunar proxy details
-- See [CONTRIBUTING.md](CONTRIBUTING.md) to contribute
-- Review example compositions in `configs/models.example.json`
-
-## Getting Help
-
-- **Installation issues**: [GitHub Issues](https://github.com/EmmaVellard/planetary-eos-lab/issues)
-- **Perple_X questions**: [Perple_X documentation](https://www.perplex.ethz.ch)
-- **General questions**: [GitHub Discussions](https://github.com/EmmaVellard/planetary-eos-lab/discussions)
+Delete the `planetary-eos-lab` folder (it contains the virtual environment, your configuration and
+your outputs: keep what you need first). Perple_X is a separate folder.
